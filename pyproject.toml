@@ -22,4 +22,4 @@ dependencies = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/linkedin", "src/config"]
+packages = ["linkedin_mcp"]

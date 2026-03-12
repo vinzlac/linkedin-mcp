@@ -10,3 +10,14 @@
 
 # auth
 tokens
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+
+# macOS
+.DS_Store
