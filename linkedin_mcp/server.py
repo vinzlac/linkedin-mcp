@@ -234,4 +234,4 @@ def main():
     """Main function for running the LinkedIn server."""
     load_dotenv()
     logger.info("Starting LinkedIn server...")
-    mcp.run()
+    mcp.run(transport="stdio")
