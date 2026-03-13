@@ -34,7 +34,7 @@ Post to LinkedIn and retrieve your posts directly from Claude Desktop.
 ### 2. Local setup
 
 ```bash
-git clone https://github.com/FilippTrigub/linkedin-mcp.git
+git clone https://github.com/vinzlac/linkedin-mcp.git
 cd linkedin-mcp
 ```
 
