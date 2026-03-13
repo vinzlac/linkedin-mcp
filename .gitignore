@@ -21,3 +21,6 @@ build/
 
 # macOS
 .DS_Store
+
+# memory
+memory/

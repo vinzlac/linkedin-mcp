@@ -1,4 +1,5 @@
 """MCP server for LinkedIn integration."""
+import json
 import logging
 import webbrowser
 from typing import List
@@ -9,6 +10,8 @@ from pydantic import FilePath
 
 from .linkedin.auth import LinkedInOAuth, AuthError
 from .linkedin.post import PostManager, PostRequest, PostCreationError, MediaRequest, PostVisibility
+from .linkedin.reader import PostReader
+from .linkedin.reader_legacy import PostReaderLegacy
 from .callback_server import LinkedInCallbackServer
 from .utils.logging import configure_logging
 from .config.settings import settings
@@ -34,6 +37,8 @@ mcp = FastMCP(
 # Initialize LinkedIn clients
 auth_client = LinkedInOAuth()
 post_manager = PostManager(auth_client)
+post_reader = PostReader(auth_client)
+post_reader_legacy = PostReaderLegacy(auth_client)
 
 
 @mcp.tool()
@@ -228,6 +233,77 @@ async def create_post(
         if ctx:
             ctx.error(error_msg)
         raise RuntimeError(error_msg)
+
+
+@mcp.tool()
+async def get_posts_legacy(count: int = 10, ctx: Context = None) -> str:
+    """Récupère les posts LinkedIn via l'API legacy /v2/shares.
+
+    Alternative à get_posts quand r_member_social n'est pas disponible.
+    Nécessite uniquement w_member_social.
+
+    Args:
+        count: Nombre de posts à récupérer (défaut 10, max 50)
+
+    Returns:
+        Liste des posts formatés (date, texte, visibilité, URN)
+    """
+    try:
+        if not auth_client.is_authenticated:
+            raise RuntimeError(
+                "Non authentifié. Lance d'abord l'outil authenticate."
+            )
+        if ctx:
+            await ctx.info(f"Récupération de {count} posts (API legacy)...")
+        posts = await post_reader_legacy.get_posts_legacy(count)
+        if not posts:
+            return "Aucun post trouvé."
+        return json.dumps(posts, ensure_ascii=False, indent=2)
+    except AuthError as e:
+        msg = str(e)
+        logger.error(msg)
+        if ctx:
+            await ctx.error(msg)
+        raise RuntimeError(msg)
+    except RuntimeError:
+        raise
+    except Exception as e:
+        logger.exception("Erreur inattendue dans get_posts_legacy")
+        raise RuntimeError(str(e))
+
+
+@mcp.tool()
+async def get_posts(count: int = 10, ctx: Context = None) -> str:
+    """Récupère les posts LinkedIn récents de l'utilisateur authentifié.
+
+    Args:
+        count: Nombre de posts à récupérer (défaut 10, max 50)
+
+    Returns:
+        Liste des posts formatés (date, texte, visibilité, URN)
+    """
+    try:
+        if not auth_client.is_authenticated:
+            raise RuntimeError(
+                "Non authentifié. Lance d'abord l'outil authenticate."
+            )
+        if ctx:
+            await ctx.info(f"Récupération de {count} posts...")
+        posts = await post_reader.get_posts(count)
+        if not posts:
+            return "Aucun post trouvé."
+        return json.dumps(posts, ensure_ascii=False, indent=2)
+    except AuthError as e:
+        msg = str(e)
+        logger.error(msg)
+        if ctx:
+            await ctx.error(msg)
+        raise RuntimeError(msg)
+    except RuntimeError:
+        raise
+    except Exception as e:
+        logger.exception("Erreur inattendue dans get_posts")
+        raise RuntimeError(str(e))
 
 
 def main():
