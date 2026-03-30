@@ -409,11 +409,35 @@ async def create_scrape_session(
 
 
 @mcp.tool()
+async def close_scrape_browser(ctx: Context = None) -> str:
+    """Ferme la fenêtre Chromium (Playwright) utilisée pour scrape_feed.
+
+    Après un appel à scrape_feed ou create_scrape_session, le navigateur reste
+    volontairement ouvert (réutilisation rapide). Tant que le processus MCP
+    tourne, Cmd+Q sur « Google Chrome for Testing » peut sembler sans effet ou
+    laisser des processus liés : utilise cet outil pour une fermeture propre,
+    ou quitte Claude Desktop pour tout arrêter.
+
+    Returns:
+        Message indiquant si le navigateur a été fermé ou était déjà inactif.
+    """
+    had_browser = _browser_manager is not None
+    await _close_browser_singleton()
+    if ctx:
+        await ctx.info("Navigateur de scraping fermé." if had_browser else "Aucun navigateur de scraping actif.")
+    if had_browser:
+        return "Navigateur Playwright (Chrome for Testing) fermé. Il sera relancé au prochain scrape_feed."
+    return "Aucun navigateur de scraping n'était ouvert."
+
+
+@mcp.tool()
 async def scrape_feed(count: int = 10, ctx: Context = None) -> str:
     """Lit les N premiers posts du feed LinkedIn de l'utilisateur connecté.
 
     Utilise un navigateur Playwright authentifié (scraping) car l'API officielle
     LinkedIn bloque la lecture du feed pour les applications standard.
+    Le navigateur reste ouvert après l'appel pour les prochains scrapes ;
+    utilise close_scrape_browser pour le fermer explicitement.
 
     Args:
         count: Nombre de posts à récupérer (défaut 10)

@@ -21,6 +21,7 @@ Post to LinkedIn and retrieve your posts directly from Claude Desktop.
 | `get_posts_legacy` | Retrieves your recent posts via legacy `/v2/shares` *(same restriction)* |
 | `create_scrape_session` | Opens Playwright Chromium, manual web login, saves `linkedin_session.json` for feed scraping |
 | `scrape_feed` | Reads your LinkedIn home feed via the saved Playwright session *(not OAuth)* |
+| `close_scrape_browser` | Closes the Playwright browser kept open after feed scraping (see note below) |
 
 ## Prerequisites
 
@@ -107,6 +108,8 @@ Expected output:
    - Only works if `r_member_social` scope is available (see [Limitations](#limitations))
 
 4. **Feed (scraping)** — OAuth does **not** log you in on the website. For `scrape_feed`, first run **`create_scrape_session`** once (Chromium opens → you sign in → session file is written), then call **`scrape_feed`**. Alternative: `uv run python create_session.py`.
+
+   **« Google Chrome for Testing » won’t go away?** The MCP server keeps that Playwright browser open between scrapes. Use **`close_scrape_browser`** when you’re done, or quit Claude Desktop to stop the MCP process entirely.
 
 ## Test scripts
 
