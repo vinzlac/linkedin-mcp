@@ -49,6 +49,10 @@ class Settings(BaseSettings):
     LINKEDIN_VERSION: str = "202210"  # LinkedIn API version
     RESTLI_PROTOCOL_VERSION: str = "2.0.0"  # Rest.li protocol version
 
+    # Scraping Settings
+    LINKEDIN_SESSION_PATH: str = "linkedin_session.json"
+    """Chemin vers le fichier de session Playwright pour linkedin_scraper."""
+
     # Token Storage Settings
     TOKEN_STORAGE_PATH: str = os.path.join("linkedin_mcp", "tokens")
 

@@ -24,3 +24,7 @@ build/
 
 # memory
 memory/
+
+# artefacts locaux (scraping, exports JSON, etc.) — le dossier est versionné vide via output/.gitkeep
+output/*
+!output/.gitkeep

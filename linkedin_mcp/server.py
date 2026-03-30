@@ -2,6 +2,7 @@
 import json
 import logging
 import webbrowser
+from pathlib import Path
 from typing import List
 
 from dotenv import load_dotenv
@@ -15,6 +16,12 @@ from .linkedin.reader_legacy import PostReaderLegacy
 from .callback_server import LinkedInCallbackServer
 from .utils.logging import configure_logging
 from .config.settings import settings
+from linkedin_scraper import (
+    AuthenticationError,
+    BrowserManager,
+    FeedScraper,
+    wait_for_manual_login,
+)
 
 # Configure logging
 configure_logging(
@@ -30,7 +37,8 @@ mcp = FastMCP(
         "mcp[cli]",
         "pydantic",
         "pydantic-settings",
-        "python-dotenv"
+        "python-dotenv",
+        "linkedin_scraper",
     ]
 )
 
@@ -39,6 +47,44 @@ auth_client = LinkedInOAuth()
 post_manager = PostManager(auth_client)
 post_reader = PostReader(auth_client)
 post_reader_legacy = PostReaderLegacy(auth_client)
+
+# Browser Playwright pour le scraping (initialisé au premier appel)
+_browser_manager: BrowserManager | None = None
+_browser_initialized: bool = False
+
+
+async def _close_browser_singleton() -> None:
+    """Ferme le navigateur Playwright réutilisé par scrape_feed (ex. après nouvelle session)."""
+    global _browser_manager, _browser_initialized
+    if _browser_manager is not None:
+        try:
+            await _browser_manager.close()
+        except Exception:
+            logger.exception("Erreur à la fermeture du navigateur MCP")
+        _browser_manager = None
+    _browser_initialized = False
+
+
+async def _get_browser() -> BrowserManager:
+    """Retourne l'instance BrowserManager, en l'initialisant si nécessaire."""
+    global _browser_manager, _browser_initialized
+
+    if _browser_initialized and _browser_manager is not None:
+        return _browser_manager
+
+    session_path = settings.LINKEDIN_SESSION_PATH
+    if not session_path or not Path(session_path).exists():
+        raise RuntimeError(
+            f"Fichier de session LinkedIn introuvable : {session_path}. "
+            "Crée-le avec l'outil create_scrape_session ou `uv run python create_session.py`."
+        )
+
+    _browser_manager = BrowserManager(headless=False)
+    await _browser_manager.start()
+    await _browser_manager.load_session(session_path)
+    _browser_initialized = True
+    logger.info(f"Navigateur Playwright initialisé avec la session {session_path}")
+    return _browser_manager
 
 
 @mcp.tool()
@@ -304,6 +350,106 @@ async def get_posts(count: int = 10, ctx: Context = None) -> str:
     except Exception as e:
         logger.exception("Erreur inattendue dans get_posts")
         raise RuntimeError(str(e))
+
+
+@mcp.tool()
+async def create_scrape_session(
+    timeout_seconds: int = 300,
+    ctx: Context = None,
+) -> str:
+    """Crée le fichier de session Playwright pour scrape_feed (connexion web LinkedIn).
+
+    Ouvre Chromium (Playwright), charge la page de login, attend que tu te connectes
+    manuellement (mot de passe, 2FA, captcha) jusqu'à ce que le feed soit utilisable,
+    puis enregistre les cookies dans LINKEDIN_SESSION_PATH (ex. linkedin_session.json).
+
+    Indépendant de l'outil authenticate (OAuth / API) : deux flux de connexion distincts.
+
+    Args:
+        timeout_seconds: Délai max pour terminer le login manuel (défaut 300 s).
+
+    Returns:
+        Message de confirmation avec le chemin du fichier de session.
+    """
+    await _close_browser_singleton()
+
+    out_path = Path(settings.LINKEDIN_SESSION_PATH).expanduser().resolve()
+    timeout_ms = max(60_000, min(timeout_seconds * 1000, 3_600_000))
+
+    logger.info("Création session Playwright pour scrape_feed → %s", out_path)
+    if ctx:
+        await ctx.info(
+            "Ouverture de Chromium : connecte-toi sur LinkedIn jusqu'au feed, "
+            f"puis attends la sauvegarde (max {timeout_seconds // 60} min)…"
+        )
+
+    browser = BrowserManager(headless=False)
+    try:
+        await browser.start()
+        await browser.page.goto("https://www.linkedin.com/login", wait_until="domcontentloaded")
+        await wait_for_manual_login(browser.page, timeout=timeout_ms)
+        await browser.save_session(str(out_path))
+    except AuthenticationError as e:
+        msg = f"Échec de la connexion manuelle : {e}"
+        logger.error(msg)
+        if ctx:
+            await ctx.error(msg)
+        raise RuntimeError(msg)
+    finally:
+        await browser.close()
+
+    logger.info("Session Playwright enregistrée : %s", out_path)
+    if ctx:
+        await ctx.info(f"Session enregistrée : {out_path}")
+
+    return (
+        f"Session Playwright enregistrée pour le scraping du feed : {out_path}\n"
+        "Tu peux maintenant utiliser l'outil scrape_feed."
+    )
+
+
+@mcp.tool()
+async def scrape_feed(count: int = 10, ctx: Context = None) -> str:
+    """Lit les N premiers posts du feed LinkedIn de l'utilisateur connecté.
+
+    Utilise un navigateur Playwright authentifié (scraping) car l'API officielle
+    LinkedIn bloque la lecture du feed pour les applications standard.
+
+    Args:
+        count: Nombre de posts à récupérer (défaut 10)
+
+    Returns:
+        Liste JSON des posts avec : url, auteur, texte, date, réactions,
+        commentaires, images, vidéo, lien externe.
+    """
+    logger.info(f"Scraping {count} posts du feed LinkedIn...")
+    try:
+        if ctx:
+            await ctx.info(f"Démarrage du scraping du feed ({count} posts)...")
+
+        browser = await _get_browser()
+        scraper = FeedScraper(browser.page)
+        posts = await scraper.scrape(limit=count)
+
+        if not posts:
+            return "Aucun post trouvé dans le feed."
+
+        if ctx:
+            await ctx.info(f"{len(posts)} posts récupérés.")
+
+        return json.dumps(
+            [p.model_dump() for p in posts],
+            ensure_ascii=False,
+            indent=2,
+            default=str,
+        )
+
+    except Exception as e:
+        error_msg = f"Erreur lors du scraping du feed : {str(e)}"
+        logger.exception("Erreur scrape_feed")
+        if ctx:
+            await ctx.error(error_msg)
+        raise RuntimeError(error_msg)
 
 
 def main():
