@@ -1,9 +1,22 @@
 """MCP LinkedIn server configuration."""
 import os
+from pathlib import Path
 
 from dotenv import load_dotenv
 from pydantic import HttpUrl, SecretStr, Field
 from pydantic_settings import BaseSettings
+
+
+def _default_session_path() -> str:
+    """Return a per-user private default path for Playwright session storage."""
+    home = Path.home()
+    if os.name == "nt":
+        base_dir = Path(os.getenv("APPDATA", home / "AppData" / "Roaming"))
+    elif os.uname().sysname == "Darwin":
+        base_dir = home / "Library" / "Application Support"
+    else:
+        base_dir = Path(os.getenv("XDG_STATE_HOME", home / ".local" / "state"))
+    return str(base_dir / "linkedin-mcp" / "linkedin_session.json")
 
 
 class Settings(BaseSettings):
@@ -50,8 +63,8 @@ class Settings(BaseSettings):
     RESTLI_PROTOCOL_VERSION: str = "2.0.0"  # Rest.li protocol version
 
     # Scraping Settings
-    LINKEDIN_SESSION_PATH: str = "linkedin_session.json"
-    """Chemin vers le fichier de session Playwright pour linkedin_scraper."""
+    LINKEDIN_SESSION_PATH: str = _default_session_path()
+    """Per-user path to Playwright session file (override via env if needed)."""
 
     # Token Storage Settings
     TOKEN_STORAGE_PATH: str = os.path.join("linkedin_mcp", "tokens")

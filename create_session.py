@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Crée le fichier de session LinkedIn (linkedin_session.json) pour le scraping.
+"""Crée le fichier de session LinkedIn pour le scraping.
 
 Ce script ouvre un navigateur Chromium pour un login manuel. Une fois connecté,
-la session est sauvegardée dans linkedin_session.json à la racine du projet.
+la session est sauvegardée dans LINKEDIN_SESSION_PATH (privé, par utilisateur).
 
 Usage:
     uv run python create_session.py
@@ -17,8 +17,9 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(__file__))
 
 from linkedin_scraper import BrowserManager, wait_for_manual_login
+from linkedin_mcp.config.settings import settings
 
-SESSION_PATH = Path(__file__).parent / "linkedin_session.json"
+SESSION_PATH = Path(settings.LINKEDIN_SESSION_PATH).expanduser().resolve()
 
 
 async def main() -> None:
@@ -48,7 +49,9 @@ async def main() -> None:
             sys.exit(1)
 
         print(f"\n💾 Sauvegarde de la session dans {SESSION_PATH}...")
+        SESSION_PATH.parent.mkdir(parents=True, exist_ok=True)
         await browser.save_session(str(SESSION_PATH))
+        os.chmod(SESSION_PATH, 0o600)
 
     print("\n" + "=" * 60)
     print("✅ Session créée avec succès.")

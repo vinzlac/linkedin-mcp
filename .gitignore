@@ -10,6 +10,7 @@
 
 # auth
 tokens
+linkedin_session.json
 
 # Python
 __pycache__/

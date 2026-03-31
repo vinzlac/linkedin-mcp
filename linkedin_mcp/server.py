@@ -1,6 +1,7 @@
 """MCP server for LinkedIn integration."""
 import json
 import logging
+import os
 import webbrowser
 from pathlib import Path
 from typing import List
@@ -388,7 +389,9 @@ async def create_scrape_session(
         await browser.start()
         await browser.page.goto("https://www.linkedin.com/login", wait_until="domcontentloaded")
         await wait_for_manual_login(browser.page, timeout=timeout_ms)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
         await browser.save_session(str(out_path))
+        os.chmod(out_path, 0o600)
     except AuthenticationError as e:
         msg = f"Échec de la connexion manuelle : {e}"
         logger.error(msg)

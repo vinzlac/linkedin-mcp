@@ -19,7 +19,7 @@ Post to LinkedIn and retrieve your posts directly from Claude Desktop.
 | `create_post` | Creates a text post on LinkedIn with optional media and visibility |
 | `get_posts` | Retrieves your recent posts via `/v2/ugcPosts` *(requires Marketing Developer Platform)* |
 | `get_posts_legacy` | Retrieves your recent posts via legacy `/v2/shares` *(same restriction)* |
-| `create_scrape_session` | Opens Playwright Chromium, manual web login, saves `linkedin_session.json` for feed scraping |
+| `create_scrape_session` | Opens Playwright Chromium, manual web login, saves a per-user private session file for feed scraping |
 | `scrape_feed` | Reads your LinkedIn home feed via the saved Playwright session *(not OAuth)* |
 | `close_scrape_browser` | Closes the Playwright browser kept open after feed scraping (see note below) |
 
@@ -47,7 +47,14 @@ Create a `.env` file:
 LINKEDIN_CLIENT_ID=your_client_id
 LINKEDIN_CLIENT_SECRET=your_client_secret
 LINKEDIN_REDIRECT_URI=http://localhost:3000/callback
+# Optional: override default per-user session path
+# LINKEDIN_SESSION_PATH=/absolute/path/private/linkedin_session.json
 ```
+
+By default, `LINKEDIN_SESSION_PATH` is per-user (outside the repo):
+- macOS: `~/Library/Application Support/linkedin-mcp/linkedin_session.json`
+- Linux: `~/.local/state/linkedin-mcp/linkedin_session.json`
+- Windows: `%APPDATA%\\linkedin-mcp\\linkedin_session.json`
 
 ## Claude Desktop Configuration
 
