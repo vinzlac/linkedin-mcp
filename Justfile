@@ -18,4 +18,4 @@ test-post TEXT="Test de post":
 
 # Teste le scraping du feed LinkedIn
 test-feed N="5":
-    uv run python test_scrape_feed.py {{ N }}
+    uv run python test_scrape_feeds.py {{ N }}

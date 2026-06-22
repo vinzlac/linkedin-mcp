@@ -55,9 +55,31 @@ if echo "$RESPONSE" | grep -q '"result"'; then
   echo ""
   echo "--- Outils disponibles ---"
   echo "$RESPONSE" | tail -1 | python3 -m json.tool 2>/dev/null || echo "$RESPONSE" | tail -1
+
+  if echo "$RESPONSE" | grep -q '"name": "scrape_post"'; then
+    echo ""
+    echo -e "${GREEN}✅ Outil scrape_post présent${NC}"
+  else
+    echo ""
+    echo -e "${RED}❌ Outil scrape_post absent de tools/list${NC}"
+    exit 1
+  fi
 else
   echo -e "${RED}❌ Pas de réponse JSON valide${NC}"
   echo "Output reçu : $RESPONSE"
+  exit 1
+fi
+
+echo ""
+echo -e "${YELLOW}▶ Test intégration scrape_post (lecture post par URL)...${NC}"
+echo ""
+
+if (cd "$WORKSPACE" && uv run python test_mcp_scrape_post.py); then
+  echo ""
+  echo -e "${GREEN}✅ scrape_post opérationnel${NC}"
+else
+  echo ""
+  echo -e "${RED}❌ Échec du test scrape_post${NC}"
   exit 1
 fi
 

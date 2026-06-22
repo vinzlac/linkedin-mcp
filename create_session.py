@@ -58,7 +58,7 @@ async def main() -> None:
     print("=" * 60)
     print(f"\nFichier : {SESSION_PATH}")
     print("\nTu peux maintenant lancer :")
-    print("  uv run python test_scrape_feed.py   # JSON dans output/feed.json")
+    print("  uv run python test_scrape_feeds.py   # JSON dans output/feed.json")
     print("=" * 60 + "\n")
 
 

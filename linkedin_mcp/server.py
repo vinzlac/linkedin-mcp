@@ -434,6 +434,138 @@ async def close_scrape_browser(ctx: Context = None) -> str:
 
 
 @mcp.tool()
+async def get_scrape_session_json(ctx: Context = None) -> str:
+    """Retourne le contenu JSON brut de la session Playwright (scrape_feed).
+
+    Utile pour exporter la session vers une autre machine.
+    """
+    session_path = Path(settings.LINKEDIN_SESSION_PATH).expanduser().resolve()
+    if not session_path.exists():
+        msg = (
+            f"Fichier de session introuvable: {session_path}. "
+            "Crée-le avec create_scrape_session."
+        )
+        if ctx:
+            await ctx.error(msg)
+        raise RuntimeError(msg)
+
+    try:
+        raw = session_path.read_text(encoding="utf-8")
+        # Validation JSON pour éviter de renvoyer un fichier corrompu.
+        json.loads(raw)
+        if ctx:
+            await ctx.info(f"Session Playwright lue depuis {session_path}")
+        return raw
+    except json.JSONDecodeError as e:
+        msg = f"Session JSON invalide ({session_path}) : {e}"
+        if ctx:
+            await ctx.error(msg)
+        raise RuntimeError(msg)
+    except Exception as e:
+        msg = f"Impossible de lire la session ({session_path}) : {e}"
+        if ctx:
+            await ctx.error(msg)
+        raise RuntimeError(msg)
+
+
+@mcp.tool()
+async def set_scrape_session_json(session_json: str, ctx: Context = None) -> str:
+    """Écrit la session Playwright depuis une chaîne JSON (ex. export d'une autre machine).
+
+    Le navigateur de scraping actif est fermé pour garantir le rechargement de la
+    nouvelle session au prochain scrape_feed.
+    """
+    session_path = Path(settings.LINKEDIN_SESSION_PATH).expanduser().resolve()
+
+    try:
+        payload = json.loads(session_json)
+    except json.JSONDecodeError as e:
+        msg = f"session_json invalide (JSON non parseable): {e}"
+        if ctx:
+            await ctx.error(msg)
+        raise RuntimeError(msg)
+
+    if not isinstance(payload, dict):
+        msg = "session_json invalide: objet JSON attendu."
+        if ctx:
+            await ctx.error(msg)
+        raise RuntimeError(msg)
+
+    if "cookies" not in payload and "origins" not in payload:
+        msg = (
+            "session_json invalide: format Playwright storage_state attendu "
+            "(clé 'cookies' et/ou 'origins')."
+        )
+        if ctx:
+            await ctx.error(msg)
+        raise RuntimeError(msg)
+
+    try:
+        await _close_browser_singleton()
+        session_path.parent.mkdir(parents=True, exist_ok=True)
+        session_path.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        os.chmod(session_path, 0o600)
+        if ctx:
+            await ctx.info(f"Session Playwright mise à jour: {session_path}")
+        return (
+            f"Session Playwright enregistrée : {session_path}\n"
+            "Le navigateur de scraping a été fermé ; relance scrape_feed."
+        )
+    except Exception as e:
+        msg = f"Impossible d'écrire la session ({session_path}) : {e}"
+        if ctx:
+            await ctx.error(msg)
+        raise RuntimeError(msg)
+
+
+@mcp.tool()
+async def scrape_post(post_url: str, ctx: Context = None) -> str:
+    """Lit un post LinkedIn précis depuis son URL.
+
+    Accepte les URLs /feed/update/urn:li:activity:... ou /posts/{slug}-share-{id}-...
+    Utilise la session Playwright (scraping web), pas l'API OAuth.
+    Nécessite create_scrape_session au préalable.
+
+    Args:
+        post_url: URL complète du post LinkedIn
+
+    Returns:
+        JSON du post : auteur, texte, date, réactions, commentaires, images, URL.
+    """
+    logger.info("Scraping post LinkedIn : %s", post_url)
+    try:
+        if ctx:
+            await ctx.info(f"Scraping du post : {post_url}")
+
+        browser = await _get_browser()
+        scraper = FeedScraper(browser.page)
+        posts = await scraper.scrape_post_by_url(post_url)
+
+        if not posts:
+            return "Aucun post trouvé pour cette URL."
+
+        if ctx:
+            await ctx.info("Post récupéré.")
+
+        return json.dumps(
+            [p.to_public_dict() for p in posts],
+            ensure_ascii=False,
+            indent=2,
+            default=str,
+        )
+
+    except Exception as e:
+        error_msg = f"Erreur lors du scraping du post : {str(e)}"
+        logger.exception("Erreur scrape_post")
+        if ctx:
+            await ctx.error(error_msg)
+        raise RuntimeError(error_msg)
+
+
+@mcp.tool()
 async def scrape_feed(count: int = 10, ctx: Context = None) -> str:
     """Lit les N premiers posts du feed LinkedIn de l'utilisateur connecté.
 
@@ -465,7 +597,7 @@ async def scrape_feed(count: int = 10, ctx: Context = None) -> str:
             await ctx.info(f"{len(posts)} posts récupérés.")
 
         return json.dumps(
-            [p.model_dump() for p in posts],
+            [p.to_public_dict() for p in posts],
             ensure_ascii=False,
             indent=2,
             default=str,

@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
-"""Test script: scrape a single LinkedIn post via Playwright session.
+"""Test script: scrape LinkedIn feed posts via Playwright session.
 
 Usage:
-    uv run python test_scrape_feed.py "https://www.linkedin.com/feed/update/urn:li:activity:123/"
-    uv run python test_scrape_feed.py "<post_url>" output/post.json
-    uv run python test_scrape_feed.py "<post_url>" --dir output
+    uv run python test_scrape_feeds.py
+    uv run python test_scrape_feeds.py 10
+    uv run python test_scrape_feeds.py 10 -
+    uv run python test_scrape_feeds.py 3 chemin.json
+    uv run python test_scrape_feeds.py 10 --dir output
 """
-import asyncio
 import argparse
+import asyncio
 import json
 import os
 import sys
@@ -19,17 +21,21 @@ sys.path.insert(0, os.path.dirname(__file__))
 from linkedin_mcp.config.settings import settings
 from linkedin_scraper import BrowserManager, FeedScraper
 
+DEFAULT_COUNT = 5
 REPO_ROOT = Path(__file__).resolve().parent
-DEFAULT_FEED_JSON = REPO_ROOT / "output" / "feed-single.json"
+DEFAULT_FEED_JSON = REPO_ROOT / "output" / "feed.json"
 
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Scrape un post LinkedIn (URL) via session Playwright."
+        description="Scrape le feed LinkedIn via session Playwright."
     )
     parser.add_argument(
-        "post_url",
-        help="URL du post LinkedIn à scraper (feed/update/...)",
+        "count",
+        nargs="?",
+        type=int,
+        default=DEFAULT_COUNT,
+        help=f"Nombre de posts (défaut {DEFAULT_COUNT})",
     )
     parser.add_argument(
         "output",
@@ -51,7 +57,7 @@ def _parse_args() -> argparse.Namespace:
 
 async def main() -> None:
     args = _parse_args()
-    post_url = args.post_url
+    count = args.count
     out_arg = args.output
     output_dir = args.output_dir
 
@@ -59,7 +65,7 @@ async def main() -> None:
 
     if output_dir:
         ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-        output_file = Path(output_dir) / ts / "feed-single.json"
+        output_file = Path(output_dir) / ts / "feed.json"
     elif out_arg == "-":
         output_file = None
     elif out_arg:
@@ -80,30 +86,28 @@ async def main() -> None:
     print("✅ Session chargée")
 
     try:
-        print(f"\n📰 Scraping du post LinkedIn : {post_url}")
+        print(f"\n📰 Scraping de {count} posts du feed LinkedIn...")
         scraper = FeedScraper(browser.page)
-        posts = await scraper.scrape_post_by_url(post_url)
+        posts = await scraper.scrape(limit=count)
 
         if not posts:
-            print("⚠️  Aucun post trouvé pour cette URL.")
+            print("⚠️  Aucun post trouvé dans le feed.")
             return
 
-        print("✅ Post récupéré\n")
+        print(f"✅ {len(posts)} post(s) récupéré(s)\n")
 
         data = [p.to_public_dict() for p in posts]
 
-        post = data[0]
-        author = post.get("author_name") or "?"
-        text_preview = (post.get("text") or "")[:120].replace("\n", " ")
-        date = post.get("posted_date") or "?"
-        reactions = post.get("reactions_count")
-        comments = post.get("comments_count")
-        print(f"{author} · {date}")
-        print(f"    {text_preview}{'…' if len(post.get('text') or '') > 120 else ''}")
-        print(f"    👍 {reactions}  💬 {comments}")
-        print(f"    🔗 {post.get('linkedin_url')}")
-        print(f"    💬 comments_with_url: {len(post.get('comments') or [])}")
-        print()
+        for i, post in enumerate(data, 1):
+            author = post.get("author_name") or "?"
+            text_preview = (post.get("text") or "")[:80].replace("\n", " ")
+            date = post.get("posted_date") or "?"
+            reactions = post.get("reactions_count")
+            comments = post.get("comments_count")
+            print(f"[{i}] {author} · {date}")
+            print(f"    {text_preview}{'…' if len(post.get('text') or '') > 80 else ''}")
+            print(f"    👍 {reactions}  💬 {comments}")
+            print()
 
         if output_file:
             output_file.parent.mkdir(parents=True, exist_ok=True)
@@ -120,3 +124,4 @@ async def main() -> None:
 
 if __name__ == "__main__":
     asyncio.run(main())
+

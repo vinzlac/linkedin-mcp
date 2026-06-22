@@ -139,8 +139,11 @@ uv run python test_create_post.py "My test post"
 # Test authentication + read posts
 uv run python test_get_posts.py
 
-# Scrape feed → écrit par défaut dans output/feed.json (répertoire ignoré par git)
-uv run python test_scrape_feed.py 5
+# Scrape plusieurs posts du feed → écrit par défaut dans output/feed.json
+uv run python test_scrape_feeds.py 5
+
+# Scrape un post unique via son URL
+uv run python test_scrape_feed.py "https://www.linkedin.com/feed/update/urn:li:activity:123/"
 ```
 
 Les exports locaux (ex. `output/feed.json`) vont dans le dossier `output/` : le contenu est ignoré par git, seul `output/.gitkeep` est versionné pour conserver le dossier dans le dépôt.
