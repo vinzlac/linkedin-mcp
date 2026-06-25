@@ -230,6 +230,10 @@ def main() -> int:
             (post.get("reactions_count") or 0) >= 50
             or (post.get("comments_count") or 0) >= 10,
         ),
+        (
+            "auteur réel",
+            "martignole" in author or "nicolas" in author,
+        ),
     ]
     failed = [label for label, ok in checks if not ok]
 
@@ -239,12 +243,6 @@ def main() -> int:
     print(f"   {preview}…")
     print(f"   👍 {post.get('reactions_count')}  💬 {post.get('comments_count')}")
     print(f"   🔗 {post.get('linkedin_url')}")
-
-    if "martignole" not in author and "martignole" not in text:
-        print(
-            "\nℹ️  Auteur DOM ≠ Nicolas Martignole (souvent la session active sur page détail) "
-            "— le contenu du post est néanmoins extrait."
-        )
 
     if failed:
         print(f"\n⚠️  Vérifications partielles échouées : {', '.join(failed)}")

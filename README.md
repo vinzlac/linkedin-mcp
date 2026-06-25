@@ -21,6 +21,8 @@ Post to LinkedIn and retrieve your posts directly from Claude Desktop.
 | `get_posts_legacy` | Retrieves your recent posts via legacy `/v2/shares` *(same restriction)* |
 | `create_scrape_session` | Opens Playwright Chromium, manual web login, saves a per-user private session file for feed scraping |
 | `scrape_feed` | Reads your LinkedIn home feed via the saved Playwright session *(not OAuth)* |
+| `scrape_post` | Reads a single LinkedIn post by URL (`/posts/...` or `/feed/update/...`) |
+| `get_scrape_session_json` / `set_scrape_session_json` | Export/import Playwright session (cross-machine) |
 | `close_scrape_browser` | Closes the Playwright browser kept open after feed scraping (see note below) |
 
 ## Prerequisites
@@ -155,6 +157,17 @@ Les exports locaux (ex. `output/feed.json`) vont dans le dossier `output/` : le 
 - default mode: formatted output with name, required/optional params, description
 - `--short`: one-line summary per tool
 - `--json`: machine-readable output (including schemas)
+
+## Troubleshooting feed scraping
+
+If `scrape_feed` returns no posts in Claude Desktop but the server starts fine:
+
+1. **Update `linkedin_scraper`** (editable dependency) and restart Claude Desktop completely.
+2. **Regenerate session** if expired: `create_scrape_session` or `uv run python create_session.py`.
+3. **Test locally** without Claude: `uv run python test_scrape_feeds.py 5 --dir output`
+4. **Install Chromium** if Playwright complains: `uv run playwright install chromium`
+
+Post-mortem (2026-06-25, empty feed / LinkedIn icon-only Repost buttons): [docs/post-mortem/2026-06-25-scrape-feed-empty.md](docs/post-mortem/2026-06-25-scrape-feed-empty.md)
 
 ## Limitations
 
