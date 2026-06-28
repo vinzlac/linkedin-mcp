@@ -45,6 +45,10 @@ class Settings(BaseSettings):
         default="https://api.linkedin.com/v2/ugcPosts",
         description="LinkedIn posts endpoint"
     )
+    LINKEDIN_REST_POSTS_URL: HttpUrl = Field(
+        default="https://api.linkedin.com/rest/posts",
+        description="LinkedIn REST posts endpoint (create + repost)"
+    )
     LINKEDIN_ASSET_REGISTER_URL: HttpUrl = Field(
         default="https://api.linkedin.com/v2/assets?action=registerUpload",
         description="LinkedIn asset registration endpoint"
@@ -59,7 +63,8 @@ class Settings(BaseSettings):
     ]
 
     # API Version Headers
-    LINKEDIN_VERSION: str = "202210"  # LinkedIn API version
+    LINKEDIN_VERSION: str = "202210"  # LinkedIn legacy API version (ugcPosts)
+    LINKEDIN_REST_VERSION: str = "202602"  # REST /posts API version
     RESTLI_PROTOCOL_VERSION: str = "2.0.0"  # Rest.li protocol version
 
     # Scraping Settings

@@ -12,6 +12,12 @@ from pydantic import FilePath
 
 from .linkedin.auth import LinkedInOAuth, AuthError
 from .linkedin.post import PostManager, PostRequest, PostCreationError, MediaRequest, PostVisibility
+from .linkedin.repost import (
+    RepostManager,
+    RepostError,
+    is_repost_api_forbidden,
+)
+from .linkedin.repost_ui import RepostUI, RepostUIError
 from .linkedin.reader import PostReader
 from .linkedin.reader_legacy import PostReaderLegacy
 from .callback_server import LinkedInCallbackServer
@@ -46,6 +52,7 @@ mcp = FastMCP(
 # Initialize LinkedIn clients
 auth_client = LinkedInOAuth()
 post_manager = PostManager(auth_client)
+repost_manager = RepostManager(auth_client)
 post_reader = PostReader(auth_client)
 post_reader_legacy = PostReaderLegacy(auth_client)
 
@@ -86,6 +93,34 @@ async def _get_browser() -> BrowserManager:
     _browser_initialized = True
     logger.info(f"Navigateur Playwright initialisé avec la session {session_path}")
     return _browser_manager
+
+
+async def _try_load_oauth_from_disk() -> bool:
+    """Charge le token OAuth depuis le disque si la session MCP n'est pas authentifiée."""
+    if auth_client.is_authenticated:
+        return True
+    token_dir = settings.TOKEN_STORAGE_PATH
+    if not os.path.isdir(token_dir):
+        return False
+    for filename in os.listdir(token_dir):
+        if not filename.endswith(".json"):
+            continue
+        user_id = filename[:-5]
+        if not auth_client.load_tokens(user_id):
+            continue
+        try:
+            await auth_client.get_user_info()
+            logger.info("Token OAuth chargé depuis %s", filename)
+            return True
+        except AuthError:
+            logger.warning("Token OAuth expiré ou invalide : %s", filename)
+            return False
+    return False
+
+
+async def _repost_via_playwright(post_url: str, commentary: str) -> str:
+    browser = await _get_browser()
+    return await RepostUI(browser.page).repost(post_url, commentary=commentary)
 
 
 @mcp.tool()
@@ -279,6 +314,114 @@ async def create_post(
         logger.exception("Unexpected error during post creation")
         if ctx:
             ctx.error(error_msg)
+        raise RuntimeError(error_msg)
+
+
+@mcp.tool()
+async def repost_post(
+    post_url: str,
+    commentary: str = "",
+    visibility: PostVisibility = "PUBLIC",
+    ctx: Context = None,
+) -> str:
+    """Reposte un post LinkedIn (API REST, fallback Playwright si 403).
+
+    Essaie d'abord POST /rest/posts (OAuth). Si LinkedIn refuse (403 sur posts tiers),
+    reposte via l'UI web et la session Playwright (create_scrape_session).
+
+    Args:
+        post_url: URL du post (feed/update/urn:li:activity:...) ou URN activity
+        commentary: Commentaire optionnel ajouté au repost
+        visibility: PUBLIC ou CONNECTIONS (API uniquement ; ignoré en fallback UI)
+
+    Returns:
+        Message de succès
+    """
+    logger.info("Repost LinkedIn post_url=%s", post_url)
+    try:
+        if ctx:
+            await ctx.info(f"Repost (visibilité API={visibility})…")
+
+        if await _try_load_oauth_from_disk():
+            try:
+                if not auth_client.user_id:
+                    await auth_client.get_user_info()
+                repost_id = await repost_manager.repost(
+                    post_url,
+                    commentary=commentary,
+                    visibility=visibility,
+                )
+                success_msg = f"Repost créé via API. ID : {repost_id}"
+                logger.info(success_msg)
+                return success_msg
+            except RepostError as api_err:
+                if not is_repost_api_forbidden(api_err):
+                    raise
+                logger.info("Repost API refusée, fallback Playwright : %s", api_err)
+                if ctx:
+                    await ctx.info(
+                        "API refusée pour ce post (403), repost via Playwright…"
+                    )
+        else:
+            logger.info("Pas de token OAuth valide, repost Playwright direct")
+            if ctx:
+                await ctx.info(
+                    "Pas de token OAuth — repost via session Playwright…"
+                )
+
+        ui_msg = await _repost_via_playwright(post_url, commentary)
+        logger.info(ui_msg)
+        return ui_msg
+
+    except (AuthError, RepostError, RepostUIError) as e:
+        error_msg = str(e)
+        logger.error(error_msg)
+        if ctx:
+            await ctx.error(error_msg)
+        raise RuntimeError(error_msg)
+    except Exception as e:
+        error_msg = f"Erreur inattendue repost : {e}"
+        logger.exception("Erreur repost_post")
+        if ctx:
+            await ctx.error(error_msg)
+        raise RuntimeError(error_msg)
+
+
+@mcp.tool()
+async def repost_post_scrape(
+    post_url: str,
+    commentary: str = "",
+    ctx: Context = None,
+) -> str:
+    """Reposte un post LinkedIn via l'UI web (session Playwright).
+
+    N'utilise pas l'API OAuth. Nécessite create_scrape_session.
+
+    Args:
+        post_url: URL du post ou urn:li:activity:ID
+        commentary: Commentaire optionnel (vide = repost instantané)
+
+    Returns:
+        Message de succès
+    """
+    logger.info("Repost Playwright post_url=%s", post_url)
+    try:
+        if ctx:
+            await ctx.info("Repost via Playwright…")
+        ui_msg = await _repost_via_playwright(post_url, commentary)
+        logger.info(ui_msg)
+        return ui_msg
+    except RepostUIError as e:
+        error_msg = str(e)
+        logger.error(error_msg)
+        if ctx:
+            await ctx.error(error_msg)
+        raise RuntimeError(error_msg)
+    except Exception as e:
+        error_msg = f"Erreur repost Playwright : {e}"
+        logger.exception("Erreur repost_post_scrape")
+        if ctx:
+            await ctx.error(error_msg)
         raise RuntimeError(error_msg)
 
 

@@ -64,6 +64,20 @@ if echo "$RESPONSE" | grep -q '"result"'; then
     echo -e "${RED}❌ Outil scrape_post absent de tools/list${NC}"
     exit 1
   fi
+
+  if echo "$RESPONSE" | grep -q '"name": "repost_post"'; then
+    echo -e "${GREEN}✅ Outil repost_post présent${NC}"
+  else
+    echo -e "${RED}❌ Outil repost_post absent de tools/list${NC}"
+    exit 1
+  fi
+
+  if echo "$RESPONSE" | grep -q '"name": "repost_post_scrape"'; then
+    echo -e "${GREEN}✅ Outil repost_post_scrape présent${NC}"
+  else
+    echo -e "${RED}❌ Outil repost_post_scrape absent de tools/list${NC}"
+    exit 1
+  fi
 else
   echo -e "${RED}❌ Pas de réponse JSON valide${NC}"
   echo "Output reçu : $RESPONSE"
