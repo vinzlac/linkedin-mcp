@@ -43,7 +43,7 @@ async def main() -> None:
         print(f"❌ Session Playwright introuvable : {session_path}")
         sys.exit(1)
 
-    browser = BrowserManager(headless=True)
+    browser = BrowserManager(headless=settings.LINKEDIN_HEADLESS)
     await browser.start()
     await browser.load_session(session_path)
 

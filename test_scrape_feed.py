@@ -74,7 +74,7 @@ async def main() -> None:
         sys.exit(1)
 
     print(f"🌐 Initialisation du navigateur (session : {session_path})...")
-    browser = BrowserManager(headless=False)
+    browser = BrowserManager(headless=settings.LINKEDIN_HEADLESS)
     await browser.start()
     await browser.load_session(session_path)
     print("✅ Session chargée")

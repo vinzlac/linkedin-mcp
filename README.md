@@ -22,6 +22,8 @@ Post to LinkedIn and retrieve your posts directly from Claude Desktop.
 | `create_scrape_session` | Opens Playwright Chromium, manual web login, saves a per-user private session file for feed scraping |
 | `scrape_feed` | Reads your LinkedIn home feed via the saved Playwright session *(not OAuth)* |
 | `scrape_post` | Reads a single LinkedIn post by URL (`/posts/...` or `/feed/update/...`) |
+| `repost_post` | Reposts a post (REST API, Playwright fallback if 403 on third-party posts) |
+| `repost_post_scrape` | Reposts via Playwright UI only (requires scrape session) |
 | `get_scrape_session_json` / `set_scrape_session_json` | Export/import Playwright session (cross-machine) |
 | `close_scrape_browser` | Closes the Playwright browser kept open after feed scraping (see note below) |
 
@@ -51,6 +53,8 @@ LINKEDIN_CLIENT_SECRET=your_client_secret
 LINKEDIN_REDIRECT_URI=http://localhost:3000/callback
 # Optional: override default per-user session path
 # LINKEDIN_SESSION_PATH=/absolute/path/private/linkedin_session.json
+# Scraping/repost headless (default true — no visible Chrome window)
+# LINKEDIN_HEADLESS=true
 ```
 
 By default, `LINKEDIN_SESSION_PATH` is per-user (outside the repo):
@@ -107,18 +111,41 @@ Expected output:
 
 ## Usage in Claude Desktop
 
-1. **Authenticate** — ask Claude: *"Authentifie-toi sur LinkedIn"*
-   - A browser window opens → authorize → token saved in `linkedin_mcp/tokens/`
-   - Token is valid for ~2 months
+### Deux authentifications distinctes
+
+Ce serveur utilise **deux connexions LinkedIn indépendantes**. L'une ne remplace pas l'autre.
+
+| Flux | Outil | Navigateur visible ? | Quand ? | Stockage |
+|------|-------|----------------------|---------|----------|
+| **OAuth API** | `authenticate` | Oui — **navigateur système** (Safari, Chrome…) | Poster via API, repost API (posts perso) | `linkedin_mcp/tokens/*.json` |
+| **Session web** | `create_scrape_session` | Oui — **Google Chrome for Testing** (Playwright) | Première connexion web, ou session expirée | `~/Library/Application Support/linkedin-mcp/linkedin_session.json` |
+| **Scraping / repost UI** | `scrape_feed`, `scrape_post`, `repost_post` | **Non** (headless par défaut) | Réutilise la session web déjà sauvegardée | — |
+
+```
+authenticate           → navigateur système (autorisation OAuth)
+create_scrape_session  → Chrome for Testing visible (login manuel LinkedIn.com)
+scrape / repost        → headless, sans fenêtre (cookies déjà en place)
+```
+
+> **Important :** `authenticate` (OAuth) **ne connecte pas** le site linkedin.com pour le scraping.  
+> Inversement, `create_scrape_session` **ne sert pas** à poster via l'API officielle.
+
+Pour forcer une fenêtre visible lors du scraping (si LinkedIn bloque le headless) : `LINKEDIN_HEADLESS=false` dans `.env` ou dans `env` de Claude Desktop.
+
+1. **Authenticate (API)** — ask Claude: *"Authentifie-toi sur LinkedIn"*
+   - Opens your **default browser** → authorize the app → token saved in `linkedin_mcp/tokens/`
+   - Token valid ~2 months
 
 2. **Create a post** — ask Claude: *"Poste un message LinkedIn : [your text]"*
 
 3. **Read posts (API)** — ask Claude: *"Récupère mes derniers posts LinkedIn"*
    - Only works if `r_member_social` scope is available (see [Limitations](#limitations))
 
-4. **Feed (scraping)** — OAuth does **not** log you in on the website. For `scrape_feed`, first run **`create_scrape_session`** once (Chromium opens → you sign in → session file is written), then call **`scrape_feed`**. Alternative: `uv run python create_session.py`.
+4. **Feed (scraping)** — run **`create_scrape_session`** once (visible Chromium → manual login → session file saved), then **`scrape_feed`** / **`scrape_post`** / **`repost_post`**. Alternative: `uv run python create_session.py`.
 
-   **« Google Chrome for Testing » won’t go away?** The MCP server keeps that Playwright browser open between scrapes. Use **`close_scrape_browser`** when you’re done, or quit Claude Desktop to stop the MCP process entirely.
+   **`create_scrape_session` is the only step that opens a visible Playwright window.** Day-to-day scraping runs headless (`LINKEDIN_HEADLESS=true` by default).
+
+   **Browser still running?** The MCP server may keep a headless Playwright instance open between scrapes. Use **`close_scrape_browser`** when done, or quit Claude Desktop.
 
 ## Test scripts
 

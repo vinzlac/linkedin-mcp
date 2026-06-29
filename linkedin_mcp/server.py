@@ -87,7 +87,7 @@ async def _get_browser() -> BrowserManager:
             "Crée-le avec l'outil create_scrape_session ou `uv run python create_session.py`."
         )
 
-    _browser_manager = BrowserManager(headless=False)
+    _browser_manager = BrowserManager(headless=settings.LINKEDIN_HEADLESS)
     await _browser_manager.start()
     await _browser_manager.load_session(session_path)
     _browser_initialized = True
@@ -503,11 +503,16 @@ async def create_scrape_session(
 ) -> str:
     """Crée le fichier de session Playwright pour scrape_feed (connexion web LinkedIn).
 
-    Ouvre Chromium (Playwright), charge la page de login, attend que tu te connectes
-    manuellement (mot de passe, 2FA, captcha) jusqu'à ce que le feed soit utilisable,
-    puis enregistre les cookies dans LINKEDIN_SESSION_PATH (ex. linkedin_session.json).
+    **Cas particulier — seul outil avec navigateur Playwright visible :**
+    ouvre « Google Chrome for Testing » (headless=False) pour que tu te connectes
+    manuellement sur linkedin.com (mot de passe, 2FA, captcha). Une fois la session
+    sauvegardée, scrape_feed / scrape_post / repost_post tournent en headless
+    (LINKEDIN_HEADLESS=true par défaut) sans fenêtre à l'écran.
 
-    Indépendant de l'outil authenticate (OAuth / API) : deux flux de connexion distincts.
+    **Indépendant de authenticate (OAuth) :**
+    - authenticate → navigateur système + token API (create_post, repost API)
+    - create_scrape_session → login web Playwright (scraping, repost UI)
+    L'un ne remplace pas l'autre.
 
     Args:
         timeout_seconds: Délai max pour terminer le login manuel (défaut 300 s).

@@ -70,6 +70,8 @@ class Settings(BaseSettings):
     # Scraping Settings
     LINKEDIN_SESSION_PATH: str = _default_session_path()
     """Per-user path to Playwright session file (override via env if needed)."""
+    LINKEDIN_HEADLESS: bool = True
+    """Run Playwright headless for scrape/repost (no visible Chrome window)."""
 
     # Token Storage Settings
     TOKEN_STORAGE_PATH: str = os.path.join("linkedin_mcp", "tokens")
