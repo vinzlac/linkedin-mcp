@@ -13,6 +13,7 @@ from .post import PostVisibility
 logger = logging.getLogger(__name__)
 
 ACTIVITY_ID_PATTERN = re.compile(r"urn:li:activity:(\d+)")
+COMPKEY_URN_PATTERN = re.compile(r"urn:li:compkey:(.+)", re.I)
 
 
 class RepostError(Exception):
@@ -39,6 +40,17 @@ def activity_id_from_post_ref(post_ref: str) -> Optional[str]:
     if post_ref.isdigit():
         return post_ref
     return None
+
+
+def compkey_from_post_ref(post_ref: str) -> Optional[str]:
+    """Extract componentkey prefix from urn:li:compkey:… for feed card lookup."""
+    post_ref = post_ref.strip()
+    match = COMPKEY_URN_PATTERN.search(post_ref)
+    if not match:
+        return None
+    raw = match.group(1)
+    base = raw.replace("expanded", "").split("FeedType_")[0]
+    return base if len(base) >= 16 else raw
 
 
 def parent_urn_candidates(activity_id: str) -> list[str]:

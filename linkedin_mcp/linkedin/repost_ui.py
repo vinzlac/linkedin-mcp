@@ -4,7 +4,9 @@ import re
 
 from playwright.async_api import Page, TimeoutError as PlaywrightTimeoutError
 
-from .repost import activity_id_from_post_ref
+from linkedin_scraper.scrapers.feed import FEED_URL, _WAIT_FOR_FEED_JS
+
+from .repost import activity_id_from_post_ref, compkey_from_post_ref
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +24,42 @@ CLICK_REPOST_ON_PAGE_JS = """
   if (btns.length === 0) return false;
   btns[0].click();
   return true;
+}
+"""
+
+CLICK_REPOST_IN_FEED_CARD_JS = """
+({ mode, value }) => {
+  function isPostRepostBtn(b) {
+    var a = (b.getAttribute("aria-label") || "").trim();
+    if (a !== "Republier" && a !== "Repost") return false;
+    if (b.closest(".comments-comment-item, .comments-comments-list, .comment-item")) {
+      return false;
+    }
+    return true;
+  }
+  function cardRoot(el) {
+    return el.closest("div[data-urn], article, .feed-shared-update-v2") || el;
+  }
+  var card = null;
+  if (mode === "compkey") {
+    var el = document.querySelector('[componentkey*="' + value + '"]');
+    if (el) card = cardRoot(el);
+  } else if (mode === "activity") {
+    var nodes = document.querySelectorAll("div[data-urn], article, [componentkey]");
+    for (var i = 0; i < nodes.length; i++) {
+      var html = nodes[i].innerHTML || "";
+      var urn = nodes[i].getAttribute("data-urn") || "";
+      if (html.indexOf(value) !== -1 || urn.indexOf(value) !== -1) {
+        card = cardRoot(nodes[i]);
+        break;
+      }
+    }
+  }
+  if (!card) return { clicked: false, reason: "card_not_found" };
+  var btns = Array.from(card.querySelectorAll("button")).filter(isPostRepostBtn);
+  if (!btns.length) return { clicked: false, reason: "no_repost_button" };
+  btns[0].click();
+  return { clicked: true };
 }
 """
 
@@ -106,22 +144,85 @@ class RepostUI:
         self.page = page
 
     async def repost(self, post_ref: str, commentary: str = "") -> str:
-        """Open post page and republish via Republier button."""
+        """Repost via post page (activity URL) or feed card (compkey)."""
+        activity_id = activity_id_from_post_ref(post_ref)
+        if activity_id:
+            return await self._repost_via_post_page(post_ref, commentary)
+
+        compkey = compkey_from_post_ref(post_ref)
+        if compkey:
+            return await self.repost_feed_card(post_ref, commentary)
+
+        raise RepostUIError(
+            f"Référence post non reconnue (activity ou compkey attendu) : {post_ref!r}"
+        )
+
+    async def _repost_via_post_page(self, post_ref: str, commentary: str) -> str:
         post_url = normalize_post_url(post_ref)
-        logger.info("Repost UI : %s", post_url)
+        logger.info("Repost UI (page post) : %s", post_url)
 
         await self.page.goto(post_url, wait_until="domcontentloaded", timeout=45000)
         await self.page.wait_for_timeout(3500)
 
         if not await self.page.evaluate(CLICK_REPOST_ON_PAGE_JS):
-            raise RepostUIError(
-                "Bouton Republier introuvable sur la page du post "
-                "(reposts désactivés ou session expirée ?)."
-            )
-        await self.page.wait_for_timeout(1500)
+            logger.info("Page post sans bouton Republier, essai carte feed")
+            return await self.repost_feed_card(post_ref, commentary)
 
+        await self.page.wait_for_timeout(1500)
+        return await self._complete_repost(commentary, via="page post")
+
+    async def repost_feed_card(self, post_ref: str, commentary: str = "") -> str:
+        """Repost by clicking Republier on a visible feed card (compkey-friendly)."""
+        compkey = compkey_from_post_ref(post_ref)
+        activity_id = activity_id_from_post_ref(post_ref)
+        if not compkey and not activity_id:
+            raise RepostUIError(
+                f"Impossible de cibler une carte feed depuis : {post_ref!r}"
+            )
+
+        mode = "compkey" if compkey else "activity"
+        value = compkey if compkey else activity_id
+        logger.info("Repost UI (carte feed) mode=%s", mode)
+
+        await self._ensure_feed_loaded()
+
+        clicked = None
+        for scroll_step in (0, 800, 1200, 1600, 2000):
+            if scroll_step:
+                await self.page.evaluate(f"window.scrollBy(0, {scroll_step})")
+                await self.page.wait_for_timeout(1500)
+            clicked = await self.page.evaluate(
+                CLICK_REPOST_IN_FEED_CARD_JS, {"mode": mode, "value": value}
+            )
+            if clicked.get("clicked"):
+                break
+
+        if not clicked or not clicked.get("clicked"):
+            reason = (clicked or {}).get("reason", "unknown")
+            raise RepostUIError(
+                f"Bouton Republier introuvable sur la carte feed ({reason}). "
+                "Le post est peut-être hors écran ou reposts désactivés."
+            )
+
+        await self.page.wait_for_timeout(1500)
+        return await self._complete_repost(commentary, via="carte feed")
+
+    async def _ensure_feed_loaded(self) -> None:
+        await self.page.goto(FEED_URL, wait_until="domcontentloaded", timeout=45000)
+        await self.page.wait_for_timeout(3000)
+        await self.page.evaluate("window.scrollBy(0, 600)")
+        await self.page.wait_for_timeout(2000)
+        try:
+            await self.page.wait_for_function(_WAIT_FOR_FEED_JS, timeout=40000)
+        except PlaywrightTimeoutError as exc:
+            raise RepostUIError(
+                "Feed LinkedIn non chargé (session expirée ?). "
+                "Relance create_scrape_session."
+            ) from exc
+
+    async def _complete_repost(self, commentary: str, *, via: str) -> str:
         if commentary.strip():
-            result = await self._repost_with_commentary(commentary)
+            result = await self._repost_with_commentary()
         else:
             result = await self._repost_instant()
 
@@ -130,7 +231,7 @@ class RepostUI:
                 "Le clic repost a été effectué mais aucune confirmation LinkedIn "
                 "n'a été détectée — le repost n'a probablement pas été publié."
             )
-        return result
+        return f"{result} ({via})"
 
     async def _repost_instant(self) -> str:
         confirm = await self.page.evaluate(CLICK_INSTANT_REPOST_MENU_JS)
@@ -142,16 +243,11 @@ class RepostUI:
                 "LinkedIn a peut-être changé l'interface."
             )
         await self.page.wait_for_timeout(2500)
-        via = confirm.get("via", "instant")
-        logger.info("Repost UI instant confirmé via %s", via)
-        return f"Repost publié via Playwright (sans commentaire)."
+        logger.info("Repost UI instant confirmé via %s", confirm.get("via"))
+        return "Repost publié via Playwright (sans commentaire)"
 
     async def _click_instant_via_locator(self) -> dict:
-        patterns = (
-            r"Diffusez instantan",
-            r"Instantly repost",
-        )
-        for pattern in patterns:
+        for pattern in (r"Diffusez instantan", r"Instantly repost"):
             loc = self.page.locator("div[role='button']").filter(
                 has_text=re.compile(pattern, re.I)
             )
@@ -201,16 +297,14 @@ class RepostUI:
             raise RepostUIError("Impossible de publier le repost avec commentaire.")
 
         await self.page.wait_for_timeout(2500)
-        return "Repost publié via Playwright (avec commentaire)."
+        return "Repost publié via Playwright (avec commentaire)"
 
     async def _verify_repost_published(self) -> bool:
-        """Best-effort check that LinkedIn acknowledged the repost."""
-        toast_selectors = (
+        for selector in (
             ".artdeco-toast-item",
             "[data-test-artdeco-toast-item-type]",
             ".artdeco-toast-item__message",
-        )
-        for selector in toast_selectors:
+        ):
             try:
                 await self.page.wait_for_selector(selector, timeout=8000)
                 text = await self.page.locator(selector).first.inner_text()
@@ -220,7 +314,6 @@ class RepostUI:
             except PlaywrightTimeoutError:
                 continue
 
-        # Menu instantané disparu = bon signe si pas d'erreur visible
         menu_open = await self.page.locator("div[role='button']").filter(
             has_text=re.compile(r"Diffusez instantan", re.I)
         ).count()

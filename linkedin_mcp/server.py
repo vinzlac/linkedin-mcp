@@ -73,6 +73,20 @@ async def _close_browser_singleton() -> None:
     _browser_initialized = False
 
 
+_PLAYWRIGHT_INSTALL_HINT = (
+    "Navigateur Playwright introuvable (souvent après nettoyage du cache macOS). "
+    "Dans le dossier linkedin-mcp : `uv run playwright install chromium`, "
+    "puis redémarre Claude Desktop."
+)
+
+
+def _playwright_start_error(exc: Exception) -> RuntimeError:
+    msg = str(exc).lower()
+    if "chrome-headless-shell" in msg or "executable doesn't exist" in msg:
+        return RuntimeError(_PLAYWRIGHT_INSTALL_HINT)
+    return RuntimeError(f"Impossible de démarrer le navigateur Playwright : {exc}")
+
+
 async def _get_browser() -> BrowserManager:
     """Retourne l'instance BrowserManager, en l'initialisant si nécessaire."""
     global _browser_manager, _browser_initialized
@@ -88,8 +102,12 @@ async def _get_browser() -> BrowserManager:
         )
 
     _browser_manager = BrowserManager(headless=settings.LINKEDIN_HEADLESS)
-    await _browser_manager.start()
-    await _browser_manager.load_session(session_path)
+    try:
+        await _browser_manager.start()
+        await _browser_manager.load_session(session_path)
+    except Exception as exc:
+        _browser_manager = None
+        raise _playwright_start_error(exc) from exc
     _browser_initialized = True
     logger.info(f"Navigateur Playwright initialisé avec la session {session_path}")
     return _browser_manager
@@ -534,7 +552,10 @@ async def create_scrape_session(
 
     browser = BrowserManager(headless=False)
     try:
-        await browser.start()
+        try:
+            await browser.start()
+        except Exception as exc:
+            raise _playwright_start_error(exc) from exc
         await browser.page.goto("https://www.linkedin.com/login", wait_until="domcontentloaded")
         await wait_for_manual_login(browser.page, timeout=timeout_ms)
         out_path.parent.mkdir(parents=True, exist_ok=True)

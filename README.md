@@ -187,6 +187,17 @@ Les exports locaux (ex. `output/feed.json`) vont dans le dossier `output/` : le 
 
 ## Troubleshooting feed scraping
 
+If `scrape_feed` / `repost_post` fails with **chrome-headless-shell missing** or **Executable doesn't exist**:
+
+1. **Cause fréquente :** nettoyage du cache macOS (`~/Library/Caches/ms-playwright/`) ou outil type CleanMyMac.
+2. **Réinstaller les navigateurs Playwright** (dans le clone `linkedin-mcp`) :
+   ```bash
+   cd /chemin/vers/linkedin-mcp
+   uv run playwright install chromium
+   ```
+3. **Redémarrer Claude Desktop** complètement (le serveur MCP garde l'ancien état en mémoire).
+4. **Vérifier en local** : `uv run python test_scrape_feeds.py 3 -`
+
 If `scrape_feed` returns no posts in Claude Desktop but the server starts fine:
 
 1. **Update `linkedin_scraper`** (editable dependency) and restart Claude Desktop completely.
