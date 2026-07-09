@@ -18,6 +18,7 @@ from .linkedin.repost import (
     is_repost_api_forbidden,
 )
 from .linkedin.repost_ui import RepostUI, RepostUIError
+from .linkedin.like_ui import LikeUI, LikeUIError, AlreadyLikedError
 from .linkedin.reader import PostReader
 from .linkedin.reader_legacy import PostReaderLegacy
 from .callback_server import LinkedInCallbackServer
@@ -438,6 +439,46 @@ async def repost_post_scrape(
     except Exception as e:
         error_msg = f"Erreur repost Playwright : {e}"
         logger.exception("Erreur repost_post_scrape")
+        if ctx:
+            await ctx.error(error_msg)
+        raise RuntimeError(error_msg)
+
+
+@mcp.tool()
+async def like_post(
+    post_url: str,
+    ctx: Context = None,
+) -> str:
+    """Like un post LinkedIn via la session Playwright (J'aime).
+
+    Fonctionne avec les URLs activity et les cartes feed compkey.
+    Nécessite create_scrape_session au préalable.
+
+    Args:
+        post_url: URL du post, urn:li:activity:ID, ou urn:li:compkey:…
+
+    Returns:
+        Message de succès ou indication que le post est déjà liké.
+    """
+    logger.info("Like LinkedIn post_url=%s", post_url)
+    try:
+        if ctx:
+            await ctx.info("Like via Playwright…")
+        browser = await _get_browser()
+        msg = await LikeUI(browser.page).like(post_url)
+        logger.info(msg)
+        return msg
+    except AlreadyLikedError as e:
+        return str(e)
+    except LikeUIError as e:
+        error_msg = str(e)
+        logger.error(error_msg)
+        if ctx:
+            await ctx.error(error_msg)
+        raise RuntimeError(error_msg)
+    except Exception as e:
+        error_msg = f"Erreur inattendue like_post : {e}"
+        logger.exception("Erreur like_post")
         if ctx:
             await ctx.error(error_msg)
         raise RuntimeError(error_msg)

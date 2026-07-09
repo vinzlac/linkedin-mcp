@@ -208,10 +208,14 @@ class RepostUI:
         return await self._complete_repost(commentary, via="carte feed")
 
     async def _ensure_feed_loaded(self) -> None:
-        await self.page.goto(FEED_URL, wait_until="domcontentloaded", timeout=45000)
-        await self.page.wait_for_timeout(3000)
-        await self.page.evaluate("window.scrollBy(0, 600)")
-        await self.page.wait_for_timeout(2000)
+        """Navigate to the feed only if not already there (compkeys change on reload)."""
+        current = self.page.url or ""
+        already_on_feed = "/feed" in current and "update" not in current
+        if not already_on_feed:
+            await self.page.goto(FEED_URL, wait_until="domcontentloaded", timeout=45000)
+            await self.page.wait_for_timeout(3000)
+            await self.page.evaluate("window.scrollBy(0, 600)")
+            await self.page.wait_for_timeout(2000)
         try:
             await self.page.wait_for_function(_WAIT_FOR_FEED_JS, timeout=40000)
         except PlaywrightTimeoutError as exc:

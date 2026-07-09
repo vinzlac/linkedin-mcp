@@ -78,6 +78,13 @@ if echo "$RESPONSE" | grep -q '"result"'; then
     echo -e "${RED}❌ Outil repost_post_scrape absent de tools/list${NC}"
     exit 1
   fi
+
+  if echo "$RESPONSE" | grep -q '"name": "like_post"'; then
+    echo -e "${GREEN}✅ Outil like_post présent${NC}"
+  else
+    echo -e "${RED}❌ Outil like_post absent de tools/list${NC}"
+    exit 1
+  fi
 else
   echo -e "${RED}❌ Pas de réponse JSON valide${NC}"
   echo "Output reçu : $RESPONSE"

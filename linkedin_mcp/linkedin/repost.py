@@ -13,6 +13,8 @@ from .post import PostVisibility
 logger = logging.getLogger(__name__)
 
 ACTIVITY_ID_PATTERN = re.compile(r"urn:li:activity:(\d+)")
+# /posts/author_slug-ACTIVITYID-SUFFIX/ or /feed/update/urn:li:activity:ID
+_POSTS_URL_PATTERN = re.compile(r"/posts/[^/]+-(\d{16,})-[A-Za-z0-9]+/?")
 COMPKEY_URN_PATTERN = re.compile(r"urn:li:compkey:(.+)", re.I)
 
 
@@ -35,6 +37,9 @@ def activity_id_from_post_ref(post_ref: str) -> Optional[str]:
     """Extract the numeric activity id from a URL, URN, or bare id."""
     post_ref = post_ref.strip()
     match = ACTIVITY_ID_PATTERN.search(post_ref)
+    if match:
+        return match.group(1)
+    match = _POSTS_URL_PATTERN.search(post_ref)
     if match:
         return match.group(1)
     if post_ref.isdigit():
