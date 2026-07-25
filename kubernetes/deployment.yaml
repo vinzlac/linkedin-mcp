@@ -1,0 +1,84 @@
+# Image GHCR — linkedin-mcp (FastMCP/uvicorn, streamable-http), port 8000, UID 1000.
+# Pas de navigateur local : scraping via CDP sur le Chromium partagé du homelab
+# (LINKEDIN_CDP_URL → chromium-cdp-pod.openclaw.svc, ADR-017 linkedin_scraper).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: linkedin-mcp
+  namespace: linkedin-mcp
+  labels:
+    app.kubernetes.io/name: linkedin-mcp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: linkedin-mcp
+  template:
+    metadata:
+      labels:
+        app: linkedin-mcp
+    spec:
+      imagePullSecrets:
+        - name: ghcr-pull
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: session
+          secret:
+            secretName: linkedin-mcp-session
+        - name: oauth-tokens
+          secret:
+            secretName: linkedin-mcp-oauth-tokens
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+        - name: app
+          image: ghcr.io/vinzlac/linkedin-mcp:main
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8000
+          env:
+            - name: LINKEDIN_CDP_URL
+              value: "http://chromium-cdp-pod.openclaw.svc.cluster.local:9222"
+            - name: LINKEDIN_SESSION_PATH
+              value: "/secrets/session/linkedin_session.json"
+            - name: TOKEN_STORAGE_PATH
+              value: "/secrets/oauth-tokens"
+          envFrom:
+            - secretRef:
+                name: linkedin-mcp-oauth-creds
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: session
+              mountPath: /secrets/session
+              readOnly: true
+            - name: oauth-tokens
+              mountPath: /secrets/oauth-tokens
+              readOnly: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "500m"
+              memory: 512Mi
+          readinessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 20

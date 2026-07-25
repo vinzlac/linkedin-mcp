@@ -185,6 +185,7 @@ Appeler un tool en lecture seule via LiteLLM avec la nouvelle clé (client MCP p
 
 - **Cooldown et cache de permalien non partagés** : `~/.cache/linkedin_scraper/` (ADR-016) est un chemin local au filesystem du pod. Si le pod redémarre, le cooldown et le cache repartent à zéro. Envisager un volume persistant (`PVC`) monté sur ce chemin si ça devient un problème en usage réel.
 - **Chromium partagé avec OpenClaw** : un pic d'usage simultané (scraping LinkedIn + OpenClaw actif) consomme les mêmes ressources CPU/RAM de `geekom-as6` — à surveiller si les deux usages deviennent fréquents (ADR-017, section Conséquences).
+- **Tokens OAuth en lecture seule dans le pod** : `linkedin-mcp-oauth-tokens` est monté en secret read-only (`kubernetes/deployment.yaml`). L'outil `authenticate` (flux OAuth, ouvre un navigateur système) écrit via `save_tokens()` — inutilisable dans ce pod headless de toute façon. Les tokens sont donc scellés une fois depuis un poste local (flux `authenticate` fait en local) puis synchronisés en lecture seule ; à ré-authentifier localement et resceller quand ils expirent (~2 mois, pas de refresh automatique observé dans le code).
 - **Vendoring `linkedin_scraper`** (étape 2) : à trancher avant d'écrire le Dockerfile définitif — impacte le workflow de mise à jour de la lib (aujourd'hui `editable`, donc un simple `git pull` suffit en local ; en image Docker il faudra un mécanisme de sync explicite).
 
 ## Ordre d'exécution recommandé
