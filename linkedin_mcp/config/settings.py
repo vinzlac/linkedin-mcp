@@ -95,6 +95,12 @@ class Settings(BaseSettings):
     # Logging Configuration
     LOG_LEVEL: str = "INFO"
 
+    # MCP Transport Settings
+    MCP_TRANSPORT: str = os.getenv("MCP_TRANSPORT", "stdio")
+    """"stdio" (default, Claude Desktop) or "streamable-http" (container deployment)."""
+    MCP_HOST: str = os.getenv("MCP_HOST", "0.0.0.0")
+    MCP_PORT: int = int(os.getenv("MCP_PORT", "8000"))
+
     class Config:
         """Pydantic config."""
         env_file = ".env"

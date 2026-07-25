@@ -41,13 +41,15 @@ logger = logging.getLogger(__name__)
 # Initialize MCP server
 mcp = FastMCP(
     "LinkedInServer",
+    host=settings.MCP_HOST,
+    port=settings.MCP_PORT,
     dependencies=[
         "httpx",
         "mcp[cli]",
         "pydantic",
         "pydantic-settings",
         "python-dotenv",
-        "linkedin_scraper",
+        "linkedin-playwright-scraper",
     ]
 )
 
@@ -854,5 +856,8 @@ async def scrape_feed(count: int = 10, ctx: Context = None) -> str:
 def main():
     """Main function for running the LinkedIn server."""
     load_dotenv()
-    logger.info("Starting LinkedIn server...")
-    mcp.run(transport="stdio")
+    logger.info("Starting LinkedIn server (transport=%s)...", settings.MCP_TRANSPORT)
+    if settings.MCP_TRANSPORT == "streamable-http":
+        mcp.run(transport="streamable-http")
+    else:
+        mcp.run(transport="stdio")

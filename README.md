@@ -94,6 +94,7 @@ Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
 > - Use the **absolute path** to the cloned repo in `--directory`
 > - Credentials must be in `env` — Claude Desktop does not load `.env` files
 > - Restart Claude Desktop after any config change
+> - `MCP_TRANSPORT` defaults to `stdio` (used here). Set `MCP_TRANSPORT=streamable-http` only for the containerized/k3s deployment (see [Déploiement k3s](#déploiement-k3s) below).
 
 ### Verify before restarting
 
@@ -200,7 +201,7 @@ If `scrape_feed` / `repost_post` fails with **chrome-headless-shell missing** or
 
 If `scrape_feed` returns no posts in Claude Desktop but the server starts fine:
 
-1. **Update `linkedin_scraper`** (editable dependency) and restart Claude Desktop completely.
+1. **Mettre à jour `linkedin-playwright-scraper`** (dépendance PyPI, voir `pyproject.toml`) et redémarrer Claude Desktop complètement.
 2. **Regenerate session** if expired: `create_scrape_session` or `uv run python create_session.py`.
 3. **Test locally** without Claude: `uv run python test_scrape_feeds.py 5 --dir output`
 4. **Install Chromium** if Playwright complains: `uv run playwright install chromium`
@@ -221,7 +222,27 @@ Workaround: export your LinkedIn data manually via **LinkedIn Settings → Data 
 |-------|-----|
 | `ModuleNotFoundError: No module named 'linkedin_mcp'` | `pyproject.toml`: `packages = ["linkedin_mcp"]` |
 | Server crash after `initialize` (protocol mismatch) | Updated `mcp >= 1.6.0` in `uv.lock` |
-| `mcp.run()` without explicit transport | `server.py`: `mcp.run(transport="stdio")` |
+| `mcp.run()` without explicit transport | `server.py`: defaults to `mcp.run(transport="stdio")`, switches to `streamable-http` when `MCP_TRANSPORT=streamable-http` |
+
+## Déploiement k3s
+
+Ce serveur peut aussi tourner comme pod interne au homelab k3s (`geekom-as6`), GitOps via **Argo CD** (dépôt `vinzlac/k3s-homelab`, ressource Application `linkedin-mcp`), exposé au monde extérieur uniquement via le **MCP Gateway de LiteLLM** (`https://llm.code-advisors.site`) — pas d'Ingress direct, service `ClusterIP` interne au cluster. Détails complets : [`docs/plan/deploy-k3s-argocd.md`](docs/plan/deploy-k3s-argocd.md).
+
+- **Image** : `ghcr.io/vinzlac/linkedin-mcp` (tags `:<sha>` et `:main`). Après chaque build, le workflow commit `kubernetes/deployment.yaml` avec le tag SHA (`paths-ignore: kubernetes/**` évite une boucle).
+- **Namespace** : `linkedin-mcp`, service `ClusterIP` sur le port `8000`.
+- **CI** : build sur runner in-cluster (**Actions Runner Controller**, scale set `arc-runner-linkedin-mcp`) via **BuildKit** (`ClusterIP`). Secret requis : `BUILDKIT_HOST=tcp://buildkitd.cicd.svc.cluster.local:1234`, configuré via `./scripts/setup-github-actions.sh`.
+- **Secret pull GHCR** (si package privé) :
+  ```bash
+  kubectl create secret docker-registry ghcr-pull \
+    --namespace=linkedin-mcp \
+    --docker-server=ghcr.io \
+    --docker-username=TON_LOGIN_GITHUB \
+    --docker-password=TON_PAT_READ_PACKAGES \
+    --dry-run=client -o yaml | kubectl apply -f -
+  ```
+  Ou depuis `k3s-homelab` : `GHCR_PULL_NAMESPACE=linkedin-mcp ./scripts/create-ghcr-pull-secret.sh`.
+- **Doc contexte homelab / CI** (pour un assistant IA ou un contributeur) : [`install-k3s.md`](install-k3s.md), régénérable depuis `k3s-homelab` via `./scripts/update-app.sh linkedin-mcp`.
+- **Rafraîchir le squelette** (fichiers `.github/`, `kubernetes/`, `scripts/` ajoutés depuis le template) depuis `k3s-homelab` : `./scripts/sync-app.sh linkedin-mcp`.
 
 ## License
 

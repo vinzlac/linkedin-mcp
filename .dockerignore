@@ -1,0 +1,16 @@
+.git
+.github
+kubernetes
+*.md
+!README.md
+node_modules
+.next
+dist
+target
+__pycache__
+*.pyc
+*.class
+.venv
+.env
+linkedin_session.json
+linkedin_mcp/tokens
