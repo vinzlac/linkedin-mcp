@@ -362,7 +362,7 @@ version = "0.1.7"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },
-    { name = "linkedin-scraper" },
+    { name = "linkedin-playwright-scraper" },
     { name = "mcp", extra = ["cli"] },
     { name = "pydantic" },
     { name = "pydantic-settings" },
@@ -373,7 +373,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "httpx", specifier = ">=0.28.1" },
-    { name = "linkedin-scraper", editable = "../linkedin_scraper" },
+    { name = "linkedin-playwright-scraper", specifier = ">=4.0.0" },
     { name = "mcp", extras = ["cli"], specifier = ">=1.6.0" },
     { name = "pydantic", specifier = ">=2.10.5" },
     { name = "pydantic-settings", specifier = ">=2.7.1" },
@@ -382,9 +382,9 @@ requires-dist = [
 ]
 
 [[package]]
-name = "linkedin-scraper"
+name = "linkedin-playwright-scraper"
 version = "4.0.0"
-source = { editable = "../linkedin_scraper" }
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiofiles" },
     { name = "lxml" },
@@ -393,26 +393,9 @@ dependencies = [
     { name = "python-dotenv" },
     { name = "requests" },
 ]
-
-[package.metadata]
-requires-dist = [
-    { name = "aiofiles", specifier = ">=23.0.0" },
-    { name = "lxml", specifier = ">=5.0.0" },
-    { name = "playwright", specifier = ">=1.40.0" },
-    { name = "pydantic", specifier = ">=2.0.0" },
-    { name = "python-dotenv", specifier = ">=1.0.0" },
-    { name = "requests", specifier = ">=2.31.0" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "black", specifier = ">=23.0.0" },
-    { name = "flake8", specifier = ">=6.0.0" },
-    { name = "mypy", specifier = ">=1.0.0" },
-    { name = "pytest", specifier = ">=7.0.0" },
-    { name = "pytest-asyncio", specifier = ">=0.21.0" },
-    { name = "pytest-cov", specifier = ">=4.0.0" },
-    { name = "twine", specifier = ">=4.0.0" },
+sdist = { url = "https://files.pythonhosted.org/packages/a7/3b/4eeecb4300a1b31f7c6ca152724bfc3e6e76763f053022b956efc53962e9/linkedin_playwright_scraper-4.0.0.tar.gz", hash = "sha256:84953a39a937a8a90288eaf64b930e405de1210dd963d63ee5421d1386767e59", size = 225018, upload-time = "2026-07-25T17:45:58.619Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/78/ad/bbe6baa284fae2ffd6a56eb014927de816417cb078a67f45a1e293fa8acd/linkedin_playwright_scraper-4.0.0-py3-none-any.whl", hash = "sha256:f44db0c00fa9fc5ae2676ab19ad62afdb1d871463c9501910d7208ff1e9ff155", size = 73959, upload-time = "2026-07-25T17:45:57.081Z" },
 ]
 
 [[package]]

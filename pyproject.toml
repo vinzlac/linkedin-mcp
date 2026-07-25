@@ -14,7 +14,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "httpx>=0.28.1",
-    "linkedin-scraper",
+    "linkedin-playwright-scraper>=4.0.0",
     "mcp[cli]>=1.6.0",
     "pydantic>=2.10.5",
     "pydantic-settings>=2.7.1",
@@ -24,6 +24,3 @@ dependencies = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["linkedin_mcp"]
-
-[tool.uv.sources]
-linkedin-scraper = { path = "../linkedin_scraper", editable = true }
