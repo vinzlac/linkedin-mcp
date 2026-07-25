@@ -4,9 +4,10 @@ import re
 
 from playwright.async_api import Page, TimeoutError as PlaywrightTimeoutError
 
+from linkedin_scraper.core import check_cooldown, enforce_write_action_pacing
 from linkedin_scraper.scrapers.feed import FEED_URL, _WAIT_FOR_FEED_JS
 
-from .repost import activity_id_from_post_ref, compkey_from_post_ref
+from .repost import activity_id_from_post_ref, canonical_post_url, compkey_from_post_ref
 
 logger = logging.getLogger(__name__)
 
@@ -65,23 +66,16 @@ CLICK_REPOST_IN_FEED_CARD_JS = """
 
 CLICK_INSTANT_REPOST_MENU_JS = """
 () => {
+  // LinkedIn has used several wordings for the same "instant repost" menu
+  // item over time ("Diffusez instantanément", "Republier instantanément",
+  // "Instantly repost", "Repost now"...) — match on the "instant(ly)" keyword
+  // rather than an exact phrase so wording changes don't silently break this.
   var nodes = Array.from(document.querySelectorAll('div[role="button"], li[role="menuitem"]'));
   for (var i = 0; i < nodes.length; i++) {
     var t = (nodes[i].innerText || "").trim();
-    if (/Diffusez instantan/i.test(t) || /Instantly repost/i.test(t)) {
+    if (/instantan/i.test(t) || /instantly/i.test(t)) {
       nodes[i].click();
-      return { clicked: true, via: "instant_menu" };
-    }
-  }
-  for (var j = 0; j < nodes.length; j++) {
-    var text = (nodes[j].innerText || "").trim();
-    var firstLine = text.split(String.fromCharCode(10))[0];
-    if (
-      (firstLine === "Republier" || firstLine === "Repost") &&
-      /instant|instantan/i.test(text)
-    ) {
-      nodes[j].click();
-      return { clicked: true, via: firstLine };
+      return { clicked: true, via: t.slice(0, 40) };
     }
   }
   return { clicked: false };
@@ -126,15 +120,13 @@ class RepostUIError(Exception):
 
 
 def normalize_post_url(post_ref: str) -> str:
-    """Return a feed update URL from a post URL, URN, or activity id."""
-    activity_id = activity_id_from_post_ref(post_ref)
-    if not activity_id:
+    """Return a navigable URL from a post URL, URN, or activity id."""
+    url = canonical_post_url(post_ref)
+    if not url:
         raise RepostUIError(
             f"URL ou URN invalide (activity id introuvable) : {post_ref!r}"
         )
-    return (
-        f"https://www.linkedin.com/feed/update/urn:li:activity:{activity_id}/"
-    )
+    return url
 
 
 class RepostUI:
@@ -145,6 +137,9 @@ class RepostUI:
 
     async def repost(self, post_ref: str, commentary: str = "") -> str:
         """Repost via post page (activity URL) or feed card (compkey)."""
+        check_cooldown()
+        await enforce_write_action_pacing("write_action")
+
         activity_id = activity_id_from_post_ref(post_ref)
         if activity_id:
             return await self._repost_via_post_page(post_ref, commentary)
@@ -161,12 +156,30 @@ class RepostUI:
         post_url = normalize_post_url(post_ref)
         logger.info("Repost UI (page post) : %s", post_url)
 
-        await self.page.goto(post_url, wait_until="domcontentloaded", timeout=45000)
-        await self.page.wait_for_timeout(3500)
+        # Skip the navigation if we're already on that exact post page (e.g.
+        # a prior scrape_post call landed us there) — re-navigating here was
+        # what pushed failures into a multi-minute feed-card fallback tail.
+        current = self.page.url or ""
+        if post_url.rstrip("/") not in current.rstrip("/"):
+            await self.page.goto(post_url, wait_until="domcontentloaded", timeout=45000)
+            await self.page.wait_for_timeout(3500)
+        else:
+            logger.info("Déjà sur la page post, pas de nouvelle navigation")
 
-        if not await self.page.evaluate(CLICK_REPOST_ON_PAGE_JS):
-            logger.info("Page post sans bouton Republier, essai carte feed")
-            return await self.repost_feed_card(post_ref, commentary)
+        clicked = False
+        for attempt, wait_ms in enumerate((0, 1500, 2500)):
+            if wait_ms:
+                await self.page.wait_for_timeout(wait_ms)
+            clicked = await self.page.evaluate(CLICK_REPOST_ON_PAGE_JS)
+            if clicked:
+                break
+            logger.info("Bouton Republier introuvable sur page post (essai %s/3)", attempt + 1)
+
+        if not clicked:
+            raise RepostUIError(
+                "Bouton Republier introuvable sur la page post. "
+                "Le post n'existe peut-être plus ou la session a expiré."
+            )
 
         await self.page.wait_for_timeout(1500)
         return await self._complete_repost(commentary, via="page post")
@@ -243,7 +256,7 @@ class RepostUI:
             confirm = await self._click_instant_via_locator()
         if not confirm.get("clicked"):
             raise RepostUIError(
-                "Option « Diffusez instantanément » introuvable dans le menu Republier. "
+                "Option de repost instantané introuvable dans le menu Republier. "
                 "LinkedIn a peut-être changé l'interface."
             )
         await self.page.wait_for_timeout(2500)
@@ -251,7 +264,7 @@ class RepostUI:
         return "Repost publié via Playwright (sans commentaire)"
 
     async def _click_instant_via_locator(self) -> dict:
-        for pattern in (r"Diffusez instantan", r"Instantly repost"):
+        for pattern in (r"instantan", r"instantly"):
             loc = self.page.locator("div[role='button']").filter(
                 has_text=re.compile(pattern, re.I)
             )

@@ -70,8 +70,24 @@ class Settings(BaseSettings):
     # Scraping Settings
     LINKEDIN_SESSION_PATH: str = _default_session_path()
     """Per-user path to Playwright session file (override via env if needed)."""
-    LINKEDIN_HEADLESS: bool = True
-    """Run Playwright headless for scrape/repost (no visible Chrome window)."""
+    LINKEDIN_HEADLESS: bool = False
+    """Run Playwright headless for scrape/repost (no visible Chrome window).
+
+    Defaults to False per linkedin_scraper ADR-002: classic headless=True is
+    trivially fingerprinted by LinkedIn (navigator.webdriver, missing
+    plugins, "HeadlessChrome" UA, degraded canvas/WebGL) and gets sessions
+    rate-limited or checkpoint-challenged quickly. On a Linux server without
+    a display, use Xvfb (ADR-011) rather than flipping this back to True.
+
+    Ignored entirely when LINKEDIN_CDP_URL is set.
+    """
+    LINKEDIN_CDP_URL: str = os.getenv("LINKEDIN_CDP_URL", "")
+    """Connect to an existing Chromium over CDP instead of launching a local
+    one — e.g. "http://192.168.1.153:9222" for the homelab's
+    chromium-cdp-host (see linkedin_scraper ADR-017). No browser window ever
+    appears locally, since the browser runs on the remote host. Empty string
+    (default) launches a local browser as before.
+    """
 
     # Token Storage Settings
     TOKEN_STORAGE_PATH: str = os.path.join("linkedin_mcp", "tokens")

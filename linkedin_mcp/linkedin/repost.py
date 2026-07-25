@@ -16,6 +16,7 @@ ACTIVITY_ID_PATTERN = re.compile(r"urn:li:activity:(\d+)")
 # /posts/author_slug-ACTIVITYID-SUFFIX/ or /feed/update/urn:li:activity:ID
 _POSTS_URL_PATTERN = re.compile(r"/posts/[^/]+-(\d{16,})-[A-Za-z0-9]+/?")
 COMPKEY_URN_PATTERN = re.compile(r"urn:li:compkey:(.+)", re.I)
+_FULL_POST_URL_PATTERN = re.compile(r"^https?://(www\.)?linkedin\.com/(posts/|feed/update/)", re.I)
 
 
 class RepostError(Exception):
@@ -45,6 +46,28 @@ def activity_id_from_post_ref(post_ref: str) -> Optional[str]:
     if post_ref.isdigit():
         return post_ref
     return None
+
+
+def canonical_post_url(post_ref: str) -> Optional[str]:
+    """URL to navigate to for like/repost UI actions.
+
+    Prefers the original URL as given when it's already a full LinkedIn post
+    permalink (/posts/... or /feed/update/...). The numeric id embedded in a
+    /posts/{slug}-{id}-{suffix}/ permalink is a share or ugcPost id, which is
+    NOT always a valid urn:li:activity: id — reconstructing
+    /feed/update/urn:li:activity:{that_id}/ from it can land on a "Post
+    introuvable" page even though the original permalink loads fine. Only
+    synthesize a feed/update URL when there's no full URL to begin with
+    (a bare URN or numeric activity id).
+    """
+    ref = post_ref.strip()
+    if _FULL_POST_URL_PATTERN.match(ref):
+        return ref.split("?")[0].split("#")[0]
+
+    activity_id = activity_id_from_post_ref(ref)
+    if not activity_id:
+        return None
+    return f"https://www.linkedin.com/feed/update/urn:li:activity:{activity_id}/"
 
 
 def compkey_from_post_ref(post_ref: str) -> Optional[str]:

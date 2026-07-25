@@ -1,4 +1,5 @@
 """MCP server for LinkedIn integration."""
+import asyncio
 import json
 import logging
 import os
@@ -61,6 +62,13 @@ post_reader_legacy = PostReaderLegacy(auth_client)
 _browser_manager: BrowserManager | None = None
 _browser_initialized: bool = False
 
+# Bounded ceiling for a single like/repost UI action. Every Playwright wait
+# inside LikeUI/RepostUI already has its own timeout, but this hard cap makes
+# sure a call can never appear to hang indefinitely from the MCP client's
+# point of view (e.g. an unexpected LinkedIn UI state or an added navigation
+# step upstream stacking waits past what the client itself is willing to wait).
+_UI_ACTION_TIMEOUT_S = 100
+
 
 async def _close_browser_singleton() -> None:
     """Ferme le navigateur Playwright réutilisé par scrape_feed (ex. après nouvelle session)."""
@@ -102,7 +110,8 @@ async def _get_browser() -> BrowserManager:
             "Crée-le avec l'outil create_scrape_session ou `uv run python create_session.py`."
         )
 
-    _browser_manager = BrowserManager(headless=settings.LINKEDIN_HEADLESS)
+    cdp_url = settings.LINKEDIN_CDP_URL or None
+    _browser_manager = BrowserManager(headless=settings.LINKEDIN_HEADLESS, cdp_url=cdp_url)
     try:
         await _browser_manager.start()
         await _browser_manager.load_session(session_path)
@@ -139,7 +148,16 @@ async def _try_load_oauth_from_disk() -> bool:
 
 async def _repost_via_playwright(post_url: str, commentary: str) -> str:
     browser = await _get_browser()
-    return await RepostUI(browser.page).repost(post_url, commentary=commentary)
+    try:
+        return await asyncio.wait_for(
+            RepostUI(browser.page).repost(post_url, commentary=commentary),
+            timeout=_UI_ACTION_TIMEOUT_S,
+        )
+    except asyncio.TimeoutError as exc:
+        raise RepostUIError(
+            f"Timeout ({_UI_ACTION_TIMEOUT_S}s) en repostant — "
+            "abandon plutôt que de rester bloqué. Réessaie."
+        ) from exc
 
 
 @mcp.tool()
@@ -465,13 +483,24 @@ async def like_post(
         if ctx:
             await ctx.info("Like via Playwright…")
         browser = await _get_browser()
-        msg = await LikeUI(browser.page).like(post_url)
+        msg = await asyncio.wait_for(
+            LikeUI(browser.page).like(post_url), timeout=_UI_ACTION_TIMEOUT_S
+        )
         logger.info(msg)
         return msg
     except AlreadyLikedError as e:
         return str(e)
     except LikeUIError as e:
         error_msg = str(e)
+        logger.error(error_msg)
+        if ctx:
+            await ctx.error(error_msg)
+        raise RuntimeError(error_msg)
+    except asyncio.TimeoutError:
+        error_msg = (
+            f"Timeout ({_UI_ACTION_TIMEOUT_S}s) en likant le post — "
+            "abandon plutôt que de rester bloqué. Réessaie."
+        )
         logger.error(error_msg)
         if ctx:
             await ctx.error(error_msg)
@@ -562,11 +591,12 @@ async def create_scrape_session(
 ) -> str:
     """Crée le fichier de session Playwright pour scrape_feed (connexion web LinkedIn).
 
-    **Cas particulier — seul outil avec navigateur Playwright visible :**
-    ouvre « Google Chrome for Testing » (headless=False) pour que tu te connectes
-    manuellement sur linkedin.com (mot de passe, 2FA, captcha). Une fois la session
-    sauvegardée, scrape_feed / scrape_post / repost_post tournent en headless
-    (LINKEDIN_HEADLESS=true par défaut) sans fenêtre à l'écran.
+    **Cas particulier — toujours un navigateur Playwright visible (headless=False) :**
+    ouvre « Google Chrome for Testing » pour que tu te connectes manuellement sur
+    linkedin.com (mot de passe, 2FA, captcha). Une fois la session sauvegardée,
+    scrape_feed / scrape_post / repost_post réutilisent LINKEDIN_HEADLESS
+    (False par défaut, voir ADR-002) ou se connectent au Chromium distant si
+    LINKEDIN_CDP_URL est défini (voir ADR-017).
 
     **Indépendant de authenticate (OAuth) :**
     - authenticate → navigateur système + token API (create_post, repost API)
