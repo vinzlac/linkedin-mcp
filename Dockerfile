@@ -15,7 +15,7 @@ RUN uv sync --frozen --no-dev
 RUN useradd -u 1000 -m mcp && chown -R mcp:mcp /app
 USER mcp
 
-ENV MCP_TRANSPORT=streamable-http UV_NO_SYNC=1
+ENV MCP_TRANSPORT=streamable-http UV_NO_SYNC=1 UV_CACHE_DIR=/tmp/uv-cache
 EXPOSE 8000
 
 CMD ["uv", "run", "linkedin-mcp"]
