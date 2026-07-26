@@ -42,6 +42,13 @@ spec:
             - name: http
               containerPort: 8000
           env:
+            # linkedin_scraper (rate_limit_guard.py, permalink_cache.py — ADR-016) écrit
+            # sans option de config dans Path.home()/.cache/linkedin_scraper. Pas de
+            # HOME réel inscriptible sous readOnlyRootFilesystem : on pointe HOME sur
+            # /tmp (emptyDir, seul chemin inscriptible). Conséquence déjà documentée
+            # dans le plan de déploiement : cooldown/cache non persistés entre restarts.
+            - name: HOME
+              value: "/tmp"
             # IP directe (pas le nom DNS du Service) : Chromium rejette en 500 toute
             # requête CDP dont le header Host n'est pas une IP littérale ou "localhost"
             # (protection anti DNS-rebinding intégrée, pas de flag pour la désactiver).
