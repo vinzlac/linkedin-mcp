@@ -1,5 +1,7 @@
 # Déploiement de `linkedin-mcp` sur k3s via ArgoCD (derrière LiteLLM)
 
+**Statut : ✅ Terminé (2026-07-26).** Les 10 étapes ci-dessous ont été exécutées et validées de bout en bout (pod sain, `tools/list` et `tools/call` fonctionnels via `https://llm.code-advisors.site` avec une clé scopée). Voir [ADR-001](adr/001-k3s-litellm-mcp-gateway.md) pour les décisions d'architecture et le [post-mortem](post-mortem/2026-07-26-k3s-litellm-mcp-gateway.md) pour le détail des trois incidents rencontrés (crash `readOnlyRootFilesystem`, course CI, config MCP LiteLLM silencieusement ignorée). Ce document reste comme référence d'implémentation et pour un futur redéploiement.
+
 Ce document est un guide d'implémentation destiné à Claude Code pour déployer le serveur MCP `linkedin-mcp` sur le homelab k3s (`geekom-as6`), avec CI/CD GitOps via ArgoCD, exposé de façon sécurisée derrière le MCP Gateway de LiteLLM (déjà en place).
 
 ## Contexte
