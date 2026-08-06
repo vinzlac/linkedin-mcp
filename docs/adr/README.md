@@ -17,3 +17,4 @@ Chaque ADR suit le format :
 | # | Titre | Status |
 |---|-------|--------|
 | [001](001-k3s-litellm-mcp-gateway.md) | Déploiement k3s exposé via le MCP Gateway LiteLLM (pas d'exposition directe) | Accepted |
+| [002](002-claude-code-mcp-client-via-litellm-gateway.md) | Enregistrement de `linkedin-mcp` (prod) comme client MCP Claude Code via le Gateway LiteLLM | Accepted |
