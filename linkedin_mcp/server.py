@@ -360,7 +360,7 @@ async def create_post(
 async def repost_post(
     post_url: str,
     commentary: str = "",
-    visibility: PostVisibility = "PUBLIC",
+    visibility: PostVisibility = PostVisibility.PUBLIC,
     ctx: Context = None,
 ) -> str:
     """Reposte un post LinkedIn (API REST, fallback Playwright si 403).
