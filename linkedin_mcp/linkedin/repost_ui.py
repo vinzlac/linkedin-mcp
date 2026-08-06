@@ -15,7 +15,13 @@ CLICK_REPOST_ON_PAGE_JS = """
 () => {
   function isPostRepostBtn(b) {
     var a = (b.getAttribute("aria-label") || "").trim();
-    if (a !== "Republier" && a !== "Repost") return false;
+    var t = (b.innerText || "").trim();
+    // LinkedIn dropped aria-label from this button (2026-08) — the button is
+    // still identifiable by its visible text or the repost SVG icon.
+    var matches = a === "Republier" || a === "Repost"
+      || t === "Republier" || t === "Repost"
+      || !!b.querySelector("svg#repost-small");
+    if (!matches) return false;
     if (b.closest(".comments-comment-item, .comments-comments-list, .comment-item")) {
       return false;
     }
@@ -32,7 +38,11 @@ CLICK_REPOST_IN_FEED_CARD_JS = """
 ({ mode, value }) => {
   function isPostRepostBtn(b) {
     var a = (b.getAttribute("aria-label") || "").trim();
-    if (a !== "Republier" && a !== "Repost") return false;
+    var t = (b.innerText || "").trim();
+    var matches = a === "Republier" || a === "Repost"
+      || t === "Republier" || t === "Repost"
+      || !!b.querySelector("svg#repost-small");
+    if (!matches) return false;
     if (b.closest(".comments-comment-item, .comments-comments-list, .comment-item")) {
       return false;
     }
