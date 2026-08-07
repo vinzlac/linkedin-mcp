@@ -22,6 +22,9 @@ Post to LinkedIn and retrieve your posts directly from Claude Desktop.
 | `create_scrape_session` | Opens Playwright Chromium, manual web login, saves a per-user private session file for feed scraping |
 | `scrape_feed` | Reads your LinkedIn home feed via the saved Playwright session *(not OAuth)* |
 | `scrape_post` | Reads a single LinkedIn post by URL (`/posts/...` or `/feed/update/...`) |
+| `list_pending_invitations` | Lists pending received invitations via Playwright session |
+| `accept_invitation` | Accepts a pending invitation by profile/company slug |
+| `ignore_invitation` | Ignores/declines a pending invitation by profile/company slug |
 | `repost_post` | Reposts a post (REST API, Playwright fallback if 403 on third-party posts) |
 | `repost_post_scrape` | Reposts via Playwright UI only (requires scrape session) |
 | `get_scrape_session_json` / `set_scrape_session_json` | Export/import Playwright session (cross-machine) |
