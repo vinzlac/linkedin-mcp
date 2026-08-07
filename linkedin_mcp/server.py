@@ -29,6 +29,7 @@ from linkedin_scraper import (
     AuthenticationError,
     BrowserManager,
     FeedScraper,
+    InvitationScraper,
     wait_for_manual_login,
 )
 
@@ -848,6 +849,119 @@ async def scrape_feed(count: int = 10, ctx: Context = None) -> str:
     except Exception as e:
         error_msg = f"Erreur lors du scraping du feed : {str(e)}"
         logger.exception("Erreur scrape_feed")
+        if ctx:
+            await ctx.error(error_msg)
+        raise RuntimeError(error_msg)
+
+
+@mcp.tool()
+async def list_pending_invitations(limit: int = 20, ctx: Context = None) -> str:
+    """Liste les invitations de relation en attente (reçues).
+
+    Utilise la session Playwright (scraping web), pas l'API OAuth.
+    Nécessite create_scrape_session au préalable (ou une session déjà présente).
+
+    Args:
+        limit: Nombre max d'invitations à retourner (défaut 20)
+
+    Returns:
+        JSON des invitations : invitation_id (slug profil), nom, headline,
+        message d'intro, relations en commun, URL profil.
+    """
+    logger.info("Listing pending invitations (limit=%s)", limit)
+    try:
+        if ctx:
+            await ctx.info(f"Récupération des invitations (limit={limit})...")
+
+        browser = await _get_browser()
+        scraper = InvitationScraper(browser.page)
+        invitations = await scraper.list_pending(limit=limit)
+
+        if not invitations:
+            return "Aucune invitation en attente."
+
+        if ctx:
+            await ctx.info(f"{len(invitations)} invitation(s) récupérée(s).")
+
+        return json.dumps(
+            [inv.to_public_dict() for inv in invitations],
+            ensure_ascii=False,
+            indent=2,
+            default=str,
+        )
+    except Exception as e:
+        error_msg = f"Erreur lors de la liste des invitations : {str(e)}"
+        logger.exception("Erreur list_pending_invitations")
+        if ctx:
+            await ctx.error(error_msg)
+        raise RuntimeError(error_msg)
+
+
+@mcp.tool()
+async def accept_invitation(invitation_id: str, ctx: Context = None) -> str:
+    """Accepte une invitation LinkedIn en attente.
+
+    Args:
+        invitation_id: Identifiant actionnable (slug profil/company, ex. ``slonjon``)
+
+    Returns:
+        JSON ``{"ok": true/false, "invitation_id": "..."}``
+    """
+    logger.info("Accepting invitation %s", invitation_id)
+    try:
+        if ctx:
+            await ctx.info(f"Acceptation de l'invitation {invitation_id}...")
+
+        browser = await _get_browser()
+        scraper = InvitationScraper(browser.page)
+        ok = await scraper.accept(invitation_id)
+
+        if ctx:
+            await ctx.info("Invitation acceptée." if ok else "Invitation non trouvée / échec.")
+
+        return json.dumps(
+            {"ok": ok, "invitation_id": invitation_id},
+            ensure_ascii=False,
+            indent=2,
+        )
+    except Exception as e:
+        error_msg = f"Erreur accept_invitation : {str(e)}"
+        logger.exception("Erreur accept_invitation")
+        if ctx:
+            await ctx.error(error_msg)
+        raise RuntimeError(error_msg)
+
+
+@mcp.tool()
+async def ignore_invitation(invitation_id: str, ctx: Context = None) -> str:
+    """Ignore / refuse une invitation LinkedIn en attente.
+
+    Args:
+        invitation_id: Identifiant actionnable (slug profil/company, ex. ``slonjon``)
+
+    Returns:
+        JSON ``{"ok": true/false, "invitation_id": "..."}``
+    """
+    logger.info("Ignoring invitation %s", invitation_id)
+    try:
+        if ctx:
+            await ctx.info(f"Ignore de l'invitation {invitation_id}...")
+
+        browser = await _get_browser()
+        scraper = InvitationScraper(browser.page)
+        ok = await scraper.ignore(invitation_id)
+
+        if ctx:
+            await ctx.info("Invitation ignorée." if ok else "Invitation non trouvée / échec.")
+
+        return json.dumps(
+            {"ok": ok, "invitation_id": invitation_id},
+            ensure_ascii=False,
+            indent=2,
+        )
+    except Exception as e:
+        error_msg = f"Erreur ignore_invitation : {str(e)}"
+        logger.exception("Erreur ignore_invitation")
         if ctx:
             await ctx.error(error_msg)
         raise RuntimeError(error_msg)
