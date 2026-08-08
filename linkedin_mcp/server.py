@@ -30,6 +30,7 @@ from linkedin_scraper import (
     BrowserManager,
     FeedScraper,
     InvitationScraper,
+    MessagingScraper,
     wait_for_manual_login,
 )
 
@@ -962,6 +963,90 @@ async def ignore_invitation(invitation_id: str, ctx: Context = None) -> str:
     except Exception as e:
         error_msg = f"Erreur ignore_invitation : {str(e)}"
         logger.exception("Erreur ignore_invitation")
+        if ctx:
+            await ctx.error(error_msg)
+        raise RuntimeError(error_msg)
+
+
+@mcp.tool()
+async def list_recent_conversations(limit: int = 20, ctx: Context = None) -> str:
+    """Liste les conversations récentes de la messagerie LinkedIn.
+
+    Utilise la session Playwright (scraping web). Nécessite create_scrape_session
+    au préalable (ou une session déjà présente).
+
+    Args:
+        limit: Nombre max de conversations (défaut 20)
+
+    Returns:
+        JSON des conversations : conversation_id, participant, preview, unread…
+    """
+    logger.info("Listing recent conversations (limit=%s)", limit)
+    try:
+        if ctx:
+            await ctx.info(f"Récupération des conversations (limit={limit})...")
+
+        browser = await _get_browser()
+        scraper = MessagingScraper(browser.page)
+        conversations = await scraper.list_recent(limit=limit)
+
+        if not conversations:
+            return "Aucune conversation trouvée."
+
+        if ctx:
+            await ctx.info(f"{len(conversations)} conversation(s) récupérée(s).")
+
+        return json.dumps(
+            [c.to_public_dict() for c in conversations],
+            ensure_ascii=False,
+            indent=2,
+            default=str,
+        )
+    except Exception as e:
+        error_msg = f"Erreur list_recent_conversations : {str(e)}"
+        logger.exception("Erreur list_recent_conversations")
+        if ctx:
+            await ctx.error(error_msg)
+        raise RuntimeError(error_msg)
+
+
+@mcp.tool()
+async def get_conversation(
+    conversation_id: str, limit: int = 50, ctx: Context = None
+) -> str:
+    """Récupère les messages d'une conversation LinkedIn.
+
+    Args:
+        conversation_id: Id du thread (segment d'URL ``/messaging/thread/{id}/``)
+        limit: Nombre max de messages récents (défaut 50)
+
+    Returns:
+        JSON des messages : text, direction, sender, sent_at, message_id…
+    """
+    logger.info("Getting conversation %s (limit=%s)", conversation_id, limit)
+    try:
+        if ctx:
+            await ctx.info(f"Lecture de la conversation {conversation_id}...")
+
+        browser = await _get_browser()
+        scraper = MessagingScraper(browser.page)
+        messages = await scraper.get_conversation(conversation_id, limit=limit)
+
+        if not messages:
+            return "Aucun message trouvé dans cette conversation."
+
+        if ctx:
+            await ctx.info(f"{len(messages)} message(s) récupéré(s).")
+
+        return json.dumps(
+            [m.to_public_dict() for m in messages],
+            ensure_ascii=False,
+            indent=2,
+            default=str,
+        )
+    except Exception as e:
+        error_msg = f"Erreur get_conversation : {str(e)}"
+        logger.exception("Erreur get_conversation")
         if ctx:
             await ctx.error(error_msg)
         raise RuntimeError(error_msg)
