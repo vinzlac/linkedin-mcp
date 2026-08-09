@@ -373,7 +373,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "httpx", specifier = ">=0.28.1" },
-    { name = "linkedin-playwright-scraper", editable = "../linkedin_scraper" },
+    { name = "linkedin-playwright-scraper", specifier = ">=4.1.0" },
     { name = "mcp", extras = ["cli"], specifier = ">=1.6.0" },
     { name = "pydantic", specifier = ">=2.10.5" },
     { name = "pydantic-settings", specifier = ">=2.7.1" },
@@ -383,8 +383,8 @@ requires-dist = [
 
 [[package]]
 name = "linkedin-playwright-scraper"
-version = "4.0.1"
-source = { editable = "../linkedin_scraper" }
+version = "4.1.0"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiofiles" },
     { name = "lxml" },
@@ -393,26 +393,9 @@ dependencies = [
     { name = "python-dotenv" },
     { name = "requests" },
 ]
-
-[package.metadata]
-requires-dist = [
-    { name = "aiofiles", specifier = ">=23.0.0" },
-    { name = "lxml", specifier = ">=5.0.0" },
-    { name = "playwright", specifier = ">=1.40.0" },
-    { name = "pydantic", specifier = ">=2.0.0" },
-    { name = "python-dotenv", specifier = ">=1.0.0" },
-    { name = "requests", specifier = ">=2.31.0" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "black", specifier = ">=23.0.0" },
-    { name = "flake8", specifier = ">=6.0.0" },
-    { name = "mypy", specifier = ">=1.0.0" },
-    { name = "pytest", specifier = ">=7.0.0" },
-    { name = "pytest-asyncio", specifier = ">=0.21.0" },
-    { name = "pytest-cov", specifier = ">=4.0.0" },
-    { name = "twine", specifier = ">=4.0.0" },
+sdist = { url = "https://files.pythonhosted.org/packages/ec/22/11b6b31eb20c203951ec2ff523f505a71ac56e9bd9caded9cc41ffcc1d83/linkedin_playwright_scraper-4.1.0.tar.gz", hash = "sha256:76e74cb31d926deffa10ba404428bc3a93e95df5f47fd5bed61b7f471f392b35", size = 239227, upload-time = "2026-08-09T10:11:01.591Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/4b/4e/7c9b40df182355031c22ea0774d13695c5cff65b4031a65eda5403a9c758/linkedin_playwright_scraper-4.1.0-py3-none-any.whl", hash = "sha256:45e4290d8228bedcd271c48252174dc4e5252942e913d42301863f80a53dd31b", size = 82981, upload-time = "2026-08-09T10:11:00.3Z" },
 ]
 
 [[package]]
