@@ -100,12 +100,45 @@ def _playwright_start_error(exc: Exception) -> RuntimeError:
     return RuntimeError(f"Impossible de démarrer le navigateur Playwright : {exc}")
 
 
+def _browser_singleton_is_alive() -> bool:
+    """True si le navigateur/page mis en cache répond encore.
+
+    Le process Playwright peut mourir sans que ce serveur en soit informé
+    (crash, OOM, redémarrage du pod CDP distant...) — sans ce contrôle,
+    _browser_initialized reste bloqué à True indéfiniment et chaque appel
+    réutilise un navigateur mort (Page.goto: Target page, context or
+    browser has been closed), en échouant systématiquement.
+    """
+    if _browser_manager is None:
+        return False
+    try:
+        return (
+            _browser_manager.browser.is_connected()
+            and not _browser_manager.page.is_closed()
+        )
+    except RuntimeError:
+        # browser/page pas encore démarré (ne devrait pas arriver ici, mais
+        # traité comme "mort" par prudence)
+        return False
+
+
 async def _get_browser() -> BrowserManager:
-    """Retourne l'instance BrowserManager, en l'initialisant si nécessaire."""
+    """Retourne l'instance BrowserManager, en l'initialisant si nécessaire.
+
+    Relance automatiquement un navigateur si celui en cache est mort — pas
+    besoin de create_scrape_session (pas de ré-authentification, le fichier
+    de session sur disque reste valide, seul le process navigateur repart).
+    """
     global _browser_manager, _browser_initialized
 
-    if _browser_initialized and _browser_manager is not None:
+    if _browser_initialized and _browser_singleton_is_alive():
         return _browser_manager
+
+    if _browser_initialized:
+        logger.warning(
+            "Navigateur Playwright mis en cache mort/déconnecté — relance automatique"
+        )
+        await _close_browser_singleton()
 
     session_path = settings.LINKEDIN_SESSION_PATH
     if not session_path or not Path(session_path).exists():
