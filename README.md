@@ -27,6 +27,7 @@ Post to LinkedIn and retrieve your posts directly from Claude Desktop.
 | `ignore_invitation` | Ignores/declines a pending invitation by profile/company slug |
 | `list_recent_conversations` | Lists recent messaging conversations via Playwright session |
 | `get_conversation` | Reads messages from a conversation thread by id |
+| `send_message` | Sends a text message in an existing conversation thread |
 | `repost_post` | Reposts a post (REST API, Playwright fallback if 403 on third-party posts) |
 | `repost_post_scrape` | Reposts via Playwright UI only (requires scrape session) |
 | `get_scrape_session_json` / `set_scrape_session_json` | Export/import Playwright session (cross-machine) |
