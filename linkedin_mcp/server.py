@@ -1085,6 +1085,49 @@ async def get_conversation(
         raise RuntimeError(error_msg)
 
 
+@mcp.tool()
+async def send_message(
+    conversation_id: str, text: str, ctx: Context = None
+) -> str:
+    """Envoie un message texte dans une conversation LinkedIn existante.
+
+    Utilise la session Playwright. Ouvre le thread, saisit le texte, puis
+    envoie (bouton Envoyer/Send si présent, sinon Entrée).
+
+    Args:
+        conversation_id: Id du thread (``/messaging/thread/{id}/``)
+        text: Corps du message (non vide)
+
+    Returns:
+        JSON ``{"ok": true/false, "conversation_id": "..."}``
+    """
+    logger.info(
+        "Sending message to %s (%s chars)", conversation_id, len(text or "")
+    )
+    try:
+        if ctx:
+            await ctx.info(f"Envoi d'un message dans {conversation_id}...")
+
+        browser = await _get_browser()
+        scraper = MessagingScraper(browser.page)
+        ok = await scraper.send_message(conversation_id, text)
+
+        if ctx:
+            await ctx.info("Message envoyé." if ok else "Échec d'envoi / non confirmé.")
+
+        return json.dumps(
+            {"ok": ok, "conversation_id": conversation_id},
+            ensure_ascii=False,
+            indent=2,
+        )
+    except Exception as e:
+        error_msg = f"Erreur send_message : {str(e)}"
+        logger.exception("Erreur send_message")
+        if ctx:
+            await ctx.error(error_msg)
+        raise RuntimeError(error_msg)
+
+
 def main():
     """Main function for running the LinkedIn server."""
     load_dotenv()
