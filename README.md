@@ -33,6 +33,57 @@ Post to LinkedIn and retrieve your posts directly from Claude Desktop.
 | `get_scrape_session_json` / `set_scrape_session_json` | Export/import Playwright session (cross-machine) |
 | `close_scrape_browser` | Closes the Playwright browser kept open after feed scraping (see note below) |
 
+### `list_pending_invitations` — JSON shape
+
+Champs historiques (inchangés) : `invitation_id`, `profile_name`, `profile_url`,
+`headline`, `message`, `shared_connection_count`, `received_at`.
+
+Champs enrichis (snake_case, `null` si inconnu) :
+
+| Champ | Valeurs / sens |
+|-------|----------------|
+| `invitation_kind` | `connection` \| `follow_person` \| `follow_company` \| `follow_newsletter` \| `unknown` |
+| `inviter_name` / `inviter_url` | Qui envoie (souvent une personne) |
+| `target_name` / `target_url` | Quoi suivre / avec qui se connecter |
+| `display_text` | Phrase exacte de la carte LinkedIn |
+
+**Avant** (invit « Gabin Dez vous a invité(e) à suivre LEYGACY ») :
+
+```json
+{
+  "invitation_id": "gabindez",
+  "profile_name": "Gabin Dez",
+  "headline": null,
+  "message": null,
+  "profile_url": "https://www.linkedin.com/in/gabindez/",
+  "received_at": null,
+  "shared_connection_count": null
+}
+```
+
+**Après** :
+
+```json
+{
+  "invitation_id": "leygacy",
+  "profile_name": "Gabin Dez",
+  "profile_url": "https://www.linkedin.com/in/gabindez/",
+  "headline": null,
+  "message": null,
+  "received_at": null,
+  "shared_connection_count": null,
+  "invitation_kind": "follow_company",
+  "inviter_name": "Gabin Dez",
+  "inviter_url": "https://www.linkedin.com/in/gabindez/",
+  "target_name": "LEYGACY",
+  "target_url": "https://www.linkedin.com/company/leygacy/",
+  "display_text": "Gabin Dez vous a invité(e) à suivre LEYGACY"
+}
+```
+
+`accept_invitation` / `ignore_invitation` continuent de résoudre la carte via
+le slug (`leygacy` ou `gabindez`).
+
 ## Prerequisites
 
 ### 1. LinkedIn Developer App

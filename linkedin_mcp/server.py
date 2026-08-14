@@ -890,7 +890,7 @@ async def scrape_feed(count: int = 10, ctx: Context = None) -> str:
 
 @mcp.tool()
 async def list_pending_invitations(limit: int = 20, ctx: Context = None) -> str:
-    """Liste les invitations de relation en attente (reçues).
+    """Liste les invitations reçues en attente (My Network).
 
     Utilise la session Playwright (scraping web), pas l'API OAuth.
     Nécessite create_scrape_session au préalable (ou une session déjà présente).
@@ -899,8 +899,21 @@ async def list_pending_invitations(limit: int = 20, ctx: Context = None) -> str:
         limit: Nombre max d'invitations à retourner (défaut 20)
 
     Returns:
-        JSON des invitations : invitation_id (slug profil), nom, headline,
-        message d'intro, relations en commun, URL profil.
+        JSON array. Champs historiques (rétrocompat) :
+        ``invitation_id``, ``profile_name``, ``profile_url``, ``headline``,
+        ``message``, ``shared_connection_count``, ``received_at``.
+
+        Champs enrichis (null si inconnu) :
+        - ``invitation_kind``: ``connection`` | ``follow_person`` |
+          ``follow_company`` | ``follow_newsletter`` | ``unknown``
+        - ``inviter_name``, ``inviter_url`` — qui envoie
+        - ``target_name``, ``target_url`` — quoi suivre / avec qui se connecter
+        - ``display_text`` — phrase exacte de la carte LinkedIn
+
+        Pour une invit « personne → suivre une page », ``invitation_id`` est le
+        slug de la page cible (ex. ``leygacy``), pas celui de l'inviteur.
+        ``accept_invitation`` / ``ignore_invitation`` acceptent ce slug
+        (ou le slug inviteur).
     """
     logger.info("Listing pending invitations (limit=%s)", limit)
     try:
