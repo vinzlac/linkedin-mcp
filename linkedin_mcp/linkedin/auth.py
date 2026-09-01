@@ -15,6 +15,22 @@ class AuthError(Exception):
     """Raised when authentication fails."""
     pass
 
+
+class TokenExpiredError(AuthError):
+    """Access token expiré ou invalide (HTTP 401).
+
+    Sous-classe d'``AuthError`` : les appelants qui peuvent basculer sur un
+    fallback (ex. ``repost_post`` -> Playwright) le distinguent d'une erreur
+    générique pour logger la cause réelle et enchaîner proprement.
+    """
+    pass
+
+
+REAUTH_HINT = (
+    "Token OAuth LinkedIn expiré ou invalide. "
+    "Relance l'outil authenticate pour ré-autoriser l'application."
+)
+
 class OAuthTokens(BaseModel):
     """OAuth tokens response model."""
     access_token: str
@@ -180,6 +196,10 @@ class LinkedInOAuth:
                     headers={"Authorization": f"Bearer {self._tokens.access_token}"}
                 )
                 
+                if response.status_code == 401:
+                    logger.warning("User info: token rejeté (401) - %s", response.text)
+                    raise TokenExpiredError(REAUTH_HINT)
+
                 if response.status_code != 200:
                     logger.error(f"User info request failed: {response.status_code} - {response.text}")
                     raise AuthError(f"User info request failed with status: {response.status_code}")
@@ -196,6 +216,8 @@ class LinkedInOAuth:
                 
                 return self._user_info
                 
+        except AuthError:
+            raise
         except httpx.HTTPStatusError as e:
             logger.error(f"HTTP error during user info request: {str(e)}")
             raise AuthError(f"Failed to get user info: HTTP error {e.response.status_code}")
@@ -205,6 +227,40 @@ class LinkedInOAuth:
         except Exception as e:
             logger.error(f"Error during user info request: {str(e)}")
             raise AuthError(f"Failed to get user info: {str(e)}")
+
+    async def refresh_access_token(self) -> OAuthTokens:
+        """Renouvelle l'access token via le refresh token stocké.
+
+        LinkedIn ne fournit un refresh token qu'aux applications approuvées ;
+        s'il est absent ou refusé, lève ``TokenExpiredError`` (ré-auth requise).
+        """
+        if not self._tokens or not self._tokens.refresh_token:
+            raise TokenExpiredError(REAUTH_HINT)
+
+        logger.info("Tentative de refresh de l'access token LinkedIn")
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    str(settings.LINKEDIN_TOKEN_URL),
+                    data={
+                        "grant_type": "refresh_token",
+                        "refresh_token": self._tokens.refresh_token,
+                        "client_id": self.client_id,
+                        "client_secret": self.client_secret,
+                    },
+                )
+        except httpx.RequestError as e:
+            raise AuthError(f"Refresh token: erreur réseau - {str(e)}")
+
+        if response.status_code != 200:
+            logger.warning(
+                "Refresh token refusé (%s) : %s", response.status_code, response.text
+            )
+            raise TokenExpiredError(REAUTH_HINT)
+
+        self._tokens = OAuthTokens(**response.json())
+        logger.info("Access token LinkedIn renouvelé")
+        return self._tokens
 
     @property
     def access_token(self) -> Optional[str]:
