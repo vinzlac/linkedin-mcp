@@ -7,7 +7,7 @@ from typing import Optional
 import httpx
 
 from ..config.settings import settings
-from .auth import LinkedInOAuth
+from .auth import LinkedInOAuth, TokenExpiredError
 from .post import PostVisibility
 
 logger = logging.getLogger(__name__)
@@ -192,8 +192,9 @@ class RepostManager:
                 logger.warning("Repost échoué pour %s — %s", parent_urn, last_error)
 
                 if response.status_code == 401:
-                    raise RepostError(
-                        "Non authentifié ou token expiré, lance authenticate d'abord"
+                    raise TokenExpiredError(
+                        "Repost API : token OAuth rejeté (401). "
+                        "Relance authenticate, ou laisse le fallback Playwright agir."
                     )
                 if response.status_code == 403:
                     raise RepostForbiddenError(

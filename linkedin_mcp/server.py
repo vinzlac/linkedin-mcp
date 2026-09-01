@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP, Context
 from pydantic import FilePath
 
-from .linkedin.auth import LinkedInOAuth, AuthError
+from .linkedin.auth import LinkedInOAuth, AuthError, TokenExpiredError
 from .linkedin.post import PostManager, PostRequest, PostCreationError, MediaRequest, PostVisibility
 from .linkedin.repost import (
     RepostManager,
@@ -20,6 +20,7 @@ from .linkedin.repost import (
 )
 from .linkedin.repost_ui import RepostUI, RepostUIError
 from .linkedin.like_ui import LikeUI, LikeUIError, AlreadyLikedError
+from .linkedin.browser_recovery import is_recoverable_browser_error
 from .linkedin.reader import PostReader
 from .linkedin.reader_legacy import PostReaderLegacy
 from .callback_server import LinkedInCallbackServer
@@ -100,7 +101,7 @@ def _playwright_start_error(exc: Exception) -> RuntimeError:
     return RuntimeError(f"Impossible de démarrer le navigateur Playwright : {exc}")
 
 
-def _browser_singleton_is_alive() -> bool:
+async def _browser_singleton_is_alive() -> bool:
     """True si le navigateur/page mis en cache répond encore.
 
     Le process Playwright peut mourir sans que ce serveur en soit informé
@@ -108,17 +109,24 @@ def _browser_singleton_is_alive() -> bool:
     _browser_initialized reste bloqué à True indéfiniment et chaque appel
     réutilise un navigateur mort (Page.goto: Target page, context or
     browser has been closed), en échouant systématiquement.
+
+    Une page *crashée* (``Page crashed``) reste ``is_connected()`` et non
+    ``is_closed()`` : seul un aller-retour réel (``evaluate``) le révèle, d'où
+    la sonde active ci-dessous.
     """
     if _browser_manager is None:
         return False
     try:
-        return (
-            _browser_manager.browser.is_connected()
-            and not _browser_manager.page.is_closed()
-        )
-    except RuntimeError:
-        # browser/page pas encore démarré (ne devrait pas arriver ici, mais
-        # traité comme "mort" par prudence)
+        if not _browser_manager.browser.is_connected():
+            return False
+        if _browser_manager.page.is_closed():
+            return False
+        await asyncio.wait_for(_browser_manager.page.evaluate("1"), timeout=5)
+        return True
+    except Exception as exc:  # noqa: BLE001 - toute erreur = navigateur inutilisable
+        # RuntimeError: browser/page pas démarré. Sinon: page crashée /
+        # contexte détruit / navigateur déconnecté — traité comme "mort".
+        logger.warning("Sonde navigateur Playwright: instance morte (%s)", exc)
         return False
 
 
@@ -131,7 +139,7 @@ async def _get_browser() -> BrowserManager:
     """
     global _browser_manager, _browser_initialized
 
-    if _browser_initialized and _browser_singleton_is_alive():
+    if _browser_initialized and await _browser_singleton_is_alive():
         return _browser_manager
 
     if _browser_initialized:
@@ -160,8 +168,35 @@ async def _get_browser() -> BrowserManager:
     return _browser_manager
 
 
+async def _with_browser_crash_retry(action, *, what: str):
+    """Exécute une action Playwright ; si le navigateur/page crashe en cours de
+    route, relance une instance propre une fois et réessaie.
+
+    ``action`` : coroutine-factory ``(BrowserManager) -> Awaitable`` — refaite à
+    partir de zéro au retry pour repartir sur la nouvelle ``page``.
+    """
+    browser = await _get_browser()
+    try:
+        return await action(browser)
+    except Exception as exc:  # noqa: BLE001
+        if not is_recoverable_browser_error(exc):
+            raise
+        logger.warning(
+            "Navigateur Playwright crashé pendant %s (%s) — relance propre + nouvel essai",
+            what,
+            exc,
+        )
+        await _close_browser_singleton()
+        browser = await _get_browser()
+        return await action(browser)
+
+
 async def _try_load_oauth_from_disk() -> bool:
-    """Charge le token OAuth depuis le disque si la session MCP n'est pas authentifiée."""
+    """Charge le token OAuth depuis le disque si la session MCP n'est pas authentifiée.
+
+    Sur token expiré (401), tente un refresh via le refresh token puis persiste
+    le nouveau token. Échec de refresh -> False (ré-auth requise via authenticate).
+    """
     if auth_client.is_authenticated:
         return True
     token_dir = settings.TOKEN_STORAGE_PATH
@@ -177,19 +212,36 @@ async def _try_load_oauth_from_disk() -> bool:
             await auth_client.get_user_info()
             logger.info("Token OAuth chargé depuis %s", filename)
             return True
+        except TokenExpiredError:
+            logger.warning("Token OAuth expiré (%s) — tentative de refresh", filename)
+            try:
+                await auth_client.refresh_access_token()
+                auth_client.save_tokens(user_id)
+                await auth_client.get_user_info()
+                logger.info("Token OAuth rafraîchi et persisté (%s)", filename)
+                return True
+            except AuthError as exc:
+                logger.warning(
+                    "Refresh impossible (%s) : %s. Ré-authentification requise via authenticate.",
+                    filename,
+                    exc,
+                )
+                return False
         except AuthError:
-            logger.warning("Token OAuth expiré ou invalide : %s", filename)
+            logger.warning("Token OAuth invalide : %s", filename)
             return False
     return False
 
 
 async def _repost_via_playwright(post_url: str, commentary: str) -> str:
-    browser = await _get_browser()
-    try:
+    async def _do(browser: BrowserManager) -> str:
         return await asyncio.wait_for(
             RepostUI(browser.page).repost(post_url, commentary=commentary),
             timeout=_UI_ACTION_TIMEOUT_S,
         )
+
+    try:
+        return await _with_browser_crash_retry(_do, what="repost")
     except asyncio.TimeoutError as exc:
         raise RepostUIError(
             f"Timeout ({_UI_ACTION_TIMEOUT_S}s) en repostant — "
@@ -428,13 +480,22 @@ async def repost_post(
                 success_msg = f"Repost créé via API. ID : {repost_id}"
                 logger.info(success_msg)
                 return success_msg
-            except RepostError as api_err:
-                if not is_repost_api_forbidden(api_err):
+            except (RepostError, AuthError) as api_err:
+                api_forbidden = isinstance(api_err, RepostError) and is_repost_api_forbidden(
+                    api_err
+                )
+                token_dead = isinstance(api_err, AuthError)
+                if not (api_forbidden or token_dead):
                     raise
-                logger.info("Repost API refusée, fallback Playwright : %s", api_err)
+                reason = "token OAuth expiré (401)" if token_dead else "API refusée (403)"
+                logger.warning(
+                    "Repost API inutilisable — %s : %s. Fallback Playwright.",
+                    reason,
+                    api_err,
+                )
                 if ctx:
                     await ctx.info(
-                        "API refusée pour ce post (403), repost via Playwright…"
+                        f"Repost API impossible ({reason}) — bascule sur Playwright…"
                     )
         else:
             logger.info("Pas de token OAuth valide, repost Playwright direct")
@@ -519,10 +580,12 @@ async def like_post(
     try:
         if ctx:
             await ctx.info("Like via Playwright…")
-        browser = await _get_browser()
-        msg = await asyncio.wait_for(
-            LikeUI(browser.page).like(post_url), timeout=_UI_ACTION_TIMEOUT_S
-        )
+        async def _do(browser: BrowserManager) -> str:
+            return await asyncio.wait_for(
+                LikeUI(browser.page).like(post_url), timeout=_UI_ACTION_TIMEOUT_S
+            )
+
+        msg = await _with_browser_crash_retry(_do, what="like")
         logger.info(msg)
         return msg
     except AlreadyLikedError as e:

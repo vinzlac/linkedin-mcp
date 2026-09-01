@@ -7,6 +7,7 @@ from playwright.async_api import Page, TimeoutError as PlaywrightTimeoutError
 from linkedin_scraper.core import check_cooldown, enforce_write_action_pacing
 from linkedin_scraper.scrapers.feed import FEED_URL, _WAIT_FOR_FEED_JS
 
+from .browser_recovery import safe_goto
 from .repost import activity_id_from_post_ref, canonical_post_url, compkey_from_post_ref
 
 logger = logging.getLogger(__name__)
@@ -171,8 +172,7 @@ class RepostUI:
         # what pushed failures into a multi-minute feed-card fallback tail.
         current = self.page.url or ""
         if post_url.rstrip("/") not in current.rstrip("/"):
-            await self.page.goto(post_url, wait_until="domcontentloaded", timeout=45000)
-            await self.page.wait_for_timeout(3500)
+            await safe_goto(self.page, post_url, settle_ms=3500)
         else:
             logger.info("Déjà sur la page post, pas de nouvelle navigation")
 
@@ -235,8 +235,7 @@ class RepostUI:
         current = self.page.url or ""
         already_on_feed = "/feed" in current and "update" not in current
         if not already_on_feed:
-            await self.page.goto(FEED_URL, wait_until="domcontentloaded", timeout=45000)
-            await self.page.wait_for_timeout(3000)
+            await safe_goto(self.page, FEED_URL)
             await self.page.evaluate("window.scrollBy(0, 600)")
             await self.page.wait_for_timeout(2000)
         try:
@@ -249,7 +248,7 @@ class RepostUI:
 
     async def _complete_repost(self, commentary: str, *, via: str) -> str:
         if commentary.strip():
-            result = await self._repost_with_commentary()
+            result = await self._repost_with_commentary(commentary)
         else:
             result = await self._repost_instant()
 

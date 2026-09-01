@@ -7,6 +7,7 @@ from playwright.async_api import Page, TimeoutError as PlaywrightTimeoutError
 from linkedin_scraper.core import check_cooldown, enforce_write_action_pacing
 from linkedin_scraper.scrapers.feed import FEED_URL, _WAIT_FOR_FEED_JS
 
+from .browser_recovery import safe_goto
 from .repost import activity_id_from_post_ref, canonical_post_url, compkey_from_post_ref
 
 logger = logging.getLogger(__name__)
@@ -125,8 +126,7 @@ class LikeUI:
         # fallback tail if the post-page click failed for an unrelated reason.
         current = self.page.url or ""
         if post_url.rstrip("/") not in current.rstrip("/"):
-            await self.page.goto(post_url, wait_until="domcontentloaded", timeout=45000)
-            await self.page.wait_for_timeout(3000)
+            await safe_goto(self.page, post_url)
         else:
             logger.info("Déjà sur la page post, pas de nouvelle navigation")
 
@@ -198,8 +198,7 @@ class LikeUI:
         current = self.page.url or ""
         already_on_feed = "/feed" in current and "update" not in current
         if not already_on_feed:
-            await self.page.goto(FEED_URL, wait_until="domcontentloaded", timeout=45000)
-            await self.page.wait_for_timeout(3000)
+            await safe_goto(self.page, FEED_URL)
             await self.page.evaluate("window.scrollBy(0, 600)")
             await self.page.wait_for_timeout(2000)
         try:
