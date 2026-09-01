@@ -1,0 +1,35 @@
+# Functional alerting rule for linkedin-mcp.
+#
+# Plain YAML (no Helm templating — this repo has no Helm) — mirrors
+# servicemonitor.yaml. The homelab kube-prometheus-stack Prometheus has empty
+# ruleSelector / ruleNamespaceSelector, so a PrometheusRule anywhere is
+# auto-discovered — no extra label required (the `app` label below only
+# matches repo convention).
+#
+# Alerts route through the homelab Alertmanager -> apprise -> Telegram.
+#
+# Offline verification (promtool):
+#   yq '.spec | {"groups": .groups}' kubernetes/prometheusrule.yaml > kubernetes/prometheusrule.rules.yaml
+#   promtool check rules kubernetes/prometheusrule.rules.yaml
+#   promtool test rules kubernetes/prometheusrule.test.yaml
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: linkedin-mcp
+  namespace: linkedin-mcp
+  labels:
+    app: linkedin-mcp
+spec:
+  groups:
+    - name: linkedin-mcp.rules
+      rules:
+        - alert: LinkedinMcpDown
+          # Fires whenever no target reports up=1: all scrapes failing, or
+          # the series disappeared from service discovery entirely.
+          expr: absent(up{namespace="linkedin-mcp"} == 1)
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "linkedin-mcp has no scrape target reporting up"
+            description: "No linkedin-mcp Prometheus target is up for 5m — the MCP server may be down, crash-looping, or unreachable. linkedin-sync depends on it."

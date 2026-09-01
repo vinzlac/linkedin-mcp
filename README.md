@@ -301,6 +301,19 @@ Ce serveur peut aussi tourner comme pod interne au homelab k3s (`geekom-as6`), G
 - **Doc contexte homelab / CI** (pour un assistant IA ou un contributeur) : [`install-k3s.md`](install-k3s.md), régénérable depuis `k3s-homelab` via `./scripts/update-app.sh linkedin-mcp`.
 - **Rafraîchir le squelette** (fichiers `.github/`, `kubernetes/`, `scripts/` ajoutés depuis le template) depuis `k3s-homelab` : `./scripts/sync-app.sh linkedin-mcp`.
 
+### Monitoring
+
+- **`/metrics`** : endpoint HTTP Prometheus (`text/plain`) sur le même port que le serveur MCP (`8000`). Expose :
+  - `linkedin_mcp_tool_calls_total{tool, outcome}` — compteur par tool MCP appelé, `outcome` ∈ `ok` / `error`.
+  - Métriques process/GC par défaut de `prometheus_client` (mémoire, CPU, GC, `up` implicite une fois scrapé).
+- **`kubernetes/servicemonitor.yaml`** : scrape le `Service` existant (`linkedin-mcp`, port nommé `http`) sur `/metrics` toutes les 30s. Le Prometheus du homelab (kube-prometheus-stack) a un `serviceMonitorSelector` vide → aucune étiquette de découverte particulière requise, juste la présence du fichier dans `kubernetes/` (Argo CD synchronise le dossier entier, pas de `kustomization.yaml`).
+- **`kubernetes/prometheusrule.yaml`** : alerte `LinkedinMcpDown` (`severity: warning`) — se déclenche si aucune cible `up{namespace="linkedin-mcp"}` ne remonte `1` pendant 5 min (scraping en échec, pod down/crash-loop, ou `ServiceMonitor`/`Service` disparu). Route via l'Alertmanager du homelab → apprise → Telegram (chemin déjà validé pour les autres alertes). Vérification hors-cluster :
+  ```bash
+  yq '.spec | {"groups": .groups}' kubernetes/prometheusrule.yaml > kubernetes/prometheusrule.rules.yaml
+  promtool check rules kubernetes/prometheusrule.rules.yaml
+  promtool test rules kubernetes/prometheusrule.test.yaml
+  ```
+
 ## License
 
 MIT License

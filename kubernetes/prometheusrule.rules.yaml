@@ -1,0 +1,20 @@
+# Extracted from prometheusrule.yaml's spec.groups so promtool (which wants a
+# bare rule file, not a k8s manifest) can load it. Regenerate after editing
+# prometheusrule.yaml:
+#
+#   yq '.spec | {"groups": .groups}' kubernetes/prometheusrule.yaml > kubernetes/prometheusrule.rules.yaml
+#
+# Run: promtool test rules kubernetes/prometheusrule.test.yaml
+groups:
+  - name: linkedin-mcp.rules
+    rules:
+      - alert: LinkedinMcpDown
+        # Fires whenever no target reports up=1: all scrapes failing, or
+        # the series disappeared from service discovery entirely.
+        expr: absent(up{namespace="linkedin-mcp"} == 1)
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "linkedin-mcp has no scrape target reporting up"
+          description: "No linkedin-mcp Prometheus target is up for 5m — the MCP server may be down, crash-looping, or unreachable. linkedin-sync depends on it."
