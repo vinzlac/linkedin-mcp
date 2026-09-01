@@ -1,0 +1,43 @@
+# promtool unit tests for the linkedin-mcp alerting rules.
+#
+# `prometheusrule.rules.yaml` is the `spec.groups` of `prometheusrule.yaml`,
+# extracted so promtool (which wants a bare rule file, not a k8s manifest) can
+# load it. Regenerate after editing prometheusrule.yaml:
+#
+#   yq '.spec | {"groups": .groups}' kubernetes/prometheusrule.yaml > kubernetes/prometheusrule.rules.yaml
+#
+# Run: promtool test rules kubernetes/prometheusrule.test.yaml
+rule_files:
+  - prometheusrule.rules.yaml
+
+evaluation_interval: 1m
+
+tests:
+  # Target down (up=0) the whole time -> no series matches up==1 -> absent()
+  # fires after for: 5m.
+  - interval: 1m
+    input_series:
+      - series: 'up{namespace="linkedin-mcp",pod="linkedin-mcp-x"}'
+        values: '0x15'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: LinkedinMcpDown
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: LinkedinMcpDown
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "linkedin-mcp has no scrape target reporting up"
+              description: "No linkedin-mcp Prometheus target is up for 5m — the MCP server may be down, crash-looping, or unreachable. linkedin-sync depends on it."
+
+  # Target up=1 throughout -> no alert.
+  - interval: 1m
+    input_series:
+      - series: 'up{namespace="linkedin-mcp",pod="linkedin-mcp-x"}'
+        values: '1x15'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: LinkedinMcpDown
+        exp_alerts: []
