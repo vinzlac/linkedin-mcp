@@ -1,0 +1,53 @@
+# Guards kubernetes/prometheusrule.yaml against drift: the promtool unit
+# tests must pass, and the checked-in extracted copy
+# (prometheusrule.rules.yaml) must match a fresh extraction from the source
+# manifest — otherwise a rule edit could silently leave the test suite
+# validating a stale copy of the rules.
+name: Prometheus rules check
+
+on:
+  pull_request:
+    paths:
+      - "kubernetes/prometheusrule.yaml"
+      - "kubernetes/prometheusrule.rules.yaml"
+      - "kubernetes/prometheusrule.test.yaml"
+      - ".github/workflows/promtool-check.yml"
+  push:
+    branches: [main]
+    paths:
+      - "kubernetes/prometheusrule.yaml"
+      - "kubernetes/prometheusrule.rules.yaml"
+      - "kubernetes/prometheusrule.test.yaml"
+      - ".github/workflows/promtool-check.yml"
+  workflow_dispatch:
+
+jobs:
+  promtool:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      PROMETHEUS_VERSION: "3.14.0"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install promtool + yq
+        run: |
+          set -euo pipefail
+          curl -sL "https://github.com/prometheus/prometheus/releases/download/v${PROMETHEUS_VERSION}/prometheus-${PROMETHEUS_VERSION}.linux-amd64.tar.gz" \
+            | tar xz "prometheus-${PROMETHEUS_VERSION}.linux-amd64/promtool"
+          sudo mv "prometheus-${PROMETHEUS_VERSION}.linux-amd64/promtool" /usr/local/bin/
+          sudo curl -sL https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -o /usr/local/bin/yq
+          sudo chmod +x /usr/local/bin/yq
+          promtool --version
+
+      - name: Checked-in prometheusrule.rules.yaml matches a fresh extraction
+        run: |
+          set -euo pipefail
+          yq '.spec | {"groups": .groups}' kubernetes/prometheusrule.yaml > /tmp/fresh-rules.yaml
+          diff /tmp/fresh-rules.yaml kubernetes/prometheusrule.rules.yaml
+
+      - name: promtool check rules
+        run: promtool check rules kubernetes/prometheusrule.rules.yaml
+
+      - name: promtool test rules
+        run: promtool test rules kubernetes/prometheusrule.test.yaml
