@@ -10,6 +10,11 @@ from typing import List
 from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP, Context
 from pydantic import FilePath
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+from starlette.requests import Request
+from starlette.responses import Response
+
+from .metrics import track_tool_calls
 
 from .linkedin.auth import LinkedInOAuth, AuthError
 from .linkedin.post import PostManager, PostRequest, PostCreationError, MediaRequest, PostVisibility
@@ -54,6 +59,13 @@ mcp = FastMCP(
         "linkedin-playwright-scraper",
     ]
 )
+
+
+@mcp.custom_route("/metrics", methods=["GET"])
+async def metrics(_request: Request) -> Response:
+    """Prometheus scrape endpoint: tool-call counters + process/GC metrics."""
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
 
 # Initialize LinkedIn clients
 auth_client = LinkedInOAuth()
@@ -198,6 +210,7 @@ async def _repost_via_playwright(post_url: str, commentary: str) -> str:
 
 
 @mcp.tool()
+@track_tool_calls
 async def authenticate(ctx: Context = None) -> str:
     """Start LinkedIn authentication flow and handle callback automatically.
 
@@ -311,6 +324,7 @@ async def authenticate(ctx: Context = None) -> str:
 
 
 @mcp.tool()
+@track_tool_calls
 async def create_post(
         text: str,
         media_files: List[FilePath] = None,
@@ -392,6 +406,7 @@ async def create_post(
 
 
 @mcp.tool()
+@track_tool_calls
 async def repost_post(
     post_url: str,
     commentary: str = "",
@@ -462,6 +477,7 @@ async def repost_post(
 
 
 @mcp.tool()
+@track_tool_calls
 async def repost_post_scrape(
     post_url: str,
     commentary: str = "",
@@ -500,6 +516,7 @@ async def repost_post_scrape(
 
 
 @mcp.tool()
+@track_tool_calls
 async def like_post(
     post_url: str,
     ctx: Context = None,
@@ -551,6 +568,7 @@ async def like_post(
 
 
 @mcp.tool()
+@track_tool_calls
 async def get_posts_legacy(count: int = 10, ctx: Context = None) -> str:
     """Récupère les posts LinkedIn via l'API legacy /v2/shares.
 
@@ -588,6 +606,7 @@ async def get_posts_legacy(count: int = 10, ctx: Context = None) -> str:
 
 
 @mcp.tool()
+@track_tool_calls
 async def get_posts(count: int = 10, ctx: Context = None) -> str:
     """Récupère les posts LinkedIn récents de l'utilisateur authentifié.
 
@@ -622,6 +641,7 @@ async def get_posts(count: int = 10, ctx: Context = None) -> str:
 
 
 @mcp.tool()
+@track_tool_calls
 async def create_scrape_session(
     timeout_seconds: int = 300,
     ctx: Context = None,
@@ -689,6 +709,7 @@ async def create_scrape_session(
 
 
 @mcp.tool()
+@track_tool_calls
 async def close_scrape_browser(ctx: Context = None) -> str:
     """Ferme la fenêtre Chromium (Playwright) utilisée pour scrape_feed.
 
@@ -711,6 +732,7 @@ async def close_scrape_browser(ctx: Context = None) -> str:
 
 
 @mcp.tool()
+@track_tool_calls
 async def get_scrape_session_json(ctx: Context = None) -> str:
     """Retourne le contenu JSON brut de la session Playwright (scrape_feed).
 
@@ -746,6 +768,7 @@ async def get_scrape_session_json(ctx: Context = None) -> str:
 
 
 @mcp.tool()
+@track_tool_calls
 async def set_scrape_session_json(session_json: str, ctx: Context = None) -> str:
     """Écrit la session Playwright depuis une chaîne JSON (ex. export d'une autre machine).
 
@@ -799,6 +822,7 @@ async def set_scrape_session_json(session_json: str, ctx: Context = None) -> str
 
 
 @mcp.tool()
+@track_tool_calls
 async def scrape_post(post_url: str, ctx: Context = None) -> str:
     """Lit un post LinkedIn précis depuis son URL.
 
@@ -843,6 +867,7 @@ async def scrape_post(post_url: str, ctx: Context = None) -> str:
 
 
 @mcp.tool()
+@track_tool_calls
 async def scrape_feed(count: int = 10, ctx: Context = None) -> str:
     """Lit les N premiers posts du feed LinkedIn de l'utilisateur connecté.
 
@@ -889,6 +914,7 @@ async def scrape_feed(count: int = 10, ctx: Context = None) -> str:
 
 
 @mcp.tool()
+@track_tool_calls
 async def list_pending_invitations(limit: int = 20, ctx: Context = None) -> str:
     """Liste les invitations reçues en attente (My Network).
 
@@ -945,6 +971,7 @@ async def list_pending_invitations(limit: int = 20, ctx: Context = None) -> str:
 
 
 @mcp.tool()
+@track_tool_calls
 async def accept_invitation(invitation_id: str, ctx: Context = None) -> str:
     """Accepte une invitation LinkedIn en attente.
 
@@ -980,6 +1007,7 @@ async def accept_invitation(invitation_id: str, ctx: Context = None) -> str:
 
 
 @mcp.tool()
+@track_tool_calls
 async def ignore_invitation(invitation_id: str, ctx: Context = None) -> str:
     """Ignore / refuse une invitation LinkedIn en attente.
 
@@ -1015,6 +1043,7 @@ async def ignore_invitation(invitation_id: str, ctx: Context = None) -> str:
 
 
 @mcp.tool()
+@track_tool_calls
 async def list_recent_conversations(limit: int = 20, ctx: Context = None) -> str:
     """Liste les conversations récentes de la messagerie LinkedIn.
 
@@ -1057,6 +1086,7 @@ async def list_recent_conversations(limit: int = 20, ctx: Context = None) -> str
 
 
 @mcp.tool()
+@track_tool_calls
 async def get_conversation(
     conversation_id: str, limit: int = 50, ctx: Context = None
 ) -> str:
@@ -1099,6 +1129,7 @@ async def get_conversation(
 
 
 @mcp.tool()
+@track_tool_calls
 async def send_message(
     conversation_id: str, text: str, ctx: Context = None
 ) -> str:
