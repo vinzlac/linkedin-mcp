@@ -83,7 +83,11 @@ spec:
               memory: 512Mi
             limits:
               cpu: "500m"
-              memory: 1Gi
+              # 1Gi -> 1.5Gi (2026-09-02) stopgap : fuite mémoire de fond persiste
+              # malgré le fix browser-crash-recovery (427a35a) — 859Mi/1Gi (86%) 7h
+              # après restart. Espace le cycle OOM le temps du vrai fix (recycle
+              # périodique du singleton BrowserManager, pas seulement sur crash).
+              memory: 1536Mi
           readinessProbe:
             tcpSocket:
               port: http
