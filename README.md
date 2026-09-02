@@ -42,7 +42,7 @@ Champs enrichis (snake_case, `null` si inconnu) :
 
 | Champ | Valeurs / sens |
 |-------|----------------|
-| `invitation_kind` | `connection` \| `follow_person` \| `follow_company` \| `follow_newsletter` \| `unknown` |
+| `invitation_kind` | `connection` \| `follow_person` \| `follow_company` \| `follow_newsletter` \| `follow_showcase_page` \| `event_invitation` \| `unknown` |
 | `inviter_name` / `inviter_url` | Qui envoie (souvent une personne) |
 | `target_name` / `target_url` | Quoi suivre / avec qui se connecter |
 | `display_text` | Phrase exacte de la carte LinkedIn |
