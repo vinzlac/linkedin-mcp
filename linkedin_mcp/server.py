@@ -994,7 +994,8 @@ async def list_pending_invitations(limit: int = 20, ctx: Context = None) -> str:
 
         Champs enrichis (null si inconnu) :
         - ``invitation_kind``: ``connection`` | ``follow_person`` |
-          ``follow_company`` | ``follow_newsletter`` | ``unknown``
+          ``follow_company`` | ``follow_newsletter`` | ``follow_showcase_page`` |
+          ``event_invitation`` | ``unknown``
         - ``inviter_name``, ``inviter_url`` — qui envoie
         - ``target_name``, ``target_url`` — quoi suivre / avec qui se connecter
         - ``display_text`` — phrase exacte de la carte LinkedIn
