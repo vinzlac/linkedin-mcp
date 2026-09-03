@@ -8,6 +8,7 @@ from linkedin_scraper.core import check_cooldown, enforce_write_action_pacing
 from linkedin_scraper.scrapers.feed import FEED_URL, _WAIT_FOR_FEED_JS
 
 from .browser_recovery import safe_goto
+from .feed_scroll import scroll_feed
 from .post_page import describe_diagnostic, diagnose_post_page
 from .repost import (
     activity_id_from_post_ref,
@@ -238,7 +239,9 @@ class RepostUI:
         clicked = None
         for scroll_step in (0, 800, 1200, 1600, 2000):
             if scroll_step:
-                await self.page.evaluate(f"window.scrollBy(0, {scroll_step})")
+                # scroll_feed et non window.scrollBy : le feed scrolle dans un
+                # conteneur interne, la fenêtre ne bouge plus (cf. feed_scroll).
+                await scroll_feed(self.page, scroll_step)
                 await self.page.wait_for_timeout(1500)
             clicked = await self.page.evaluate(
                 CLICK_REPOST_IN_FEED_CARD_JS, {"mode": mode, "value": value}
@@ -262,7 +265,7 @@ class RepostUI:
         already_on_feed = "/feed" in current and "update" not in current
         if not already_on_feed:
             await safe_goto(self.page, FEED_URL)
-            await self.page.evaluate("window.scrollBy(0, 600)")
+            await scroll_feed(self.page, 600)
             await self.page.wait_for_timeout(2000)
         try:
             await self.page.wait_for_function(_WAIT_FOR_FEED_JS, timeout=40000)
