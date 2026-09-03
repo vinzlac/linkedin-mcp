@@ -8,7 +8,13 @@ from linkedin_scraper.core import check_cooldown, enforce_write_action_pacing
 from linkedin_scraper.scrapers.feed import FEED_URL, _WAIT_FOR_FEED_JS
 
 from .browser_recovery import safe_goto
-from .repost import activity_id_from_post_ref, canonical_post_url, compkey_from_post_ref
+from .post_page import describe_diagnostic, diagnose_post_page
+from .repost import (
+    activity_id_from_post_ref,
+    canonical_post_url,
+    compkey_from_post_ref,
+    post_url_candidates,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -164,35 +170,55 @@ class RepostUI:
         )
 
     async def _repost_via_post_page(self, post_ref: str, commentary: str) -> str:
-        post_url = normalize_post_url(post_ref)
-        logger.info("Repost UI (page post) : %s", post_url)
+        """Repost via la page du post, en essayant chaque forme d'URL en cascade.
 
-        # Skip the navigation if we're already on that exact post page (e.g.
-        # a prior scrape_post call landed us there) — re-navigating here was
-        # what pushed failures into a multi-minute feed-card fallback tail.
-        current = self.page.url or ""
-        if post_url.rstrip("/") not in current.rstrip("/"):
-            await safe_goto(self.page, post_url, settle_ms=3500)
-        else:
-            logger.info("Déjà sur la page post, pas de nouvelle navigation")
-
-        clicked = False
-        for attempt, wait_ms in enumerate((0, 1500, 2500)):
-            if wait_ms:
-                await self.page.wait_for_timeout(wait_ms)
-            clicked = await self.page.evaluate(CLICK_REPOST_ON_PAGE_JS)
-            if clicked:
-                break
-            logger.info("Bouton Republier introuvable sur page post (essai %s/3)", attempt + 1)
-
-        if not clicked:
+        Même cause qu'un like en échec sur un URN reconstruit : l'id d'un slug
+        `-share-` / `-ugcPost-` n'est pas forcément un activity id valide, donc
+        /feed/update/urn:li:activity:<id>/ peut rendre une page sans bouton
+        Republier (rapport du 2026-09-03). Voir post_url_candidates().
+        """
+        candidates = post_url_candidates(post_ref)
+        if not candidates:
             raise RepostUIError(
-                "Bouton Republier introuvable sur la page post. "
-                "Le post n'existe peut-être plus ou la session a expiré."
+                f"URL ou URN invalide (activity id introuvable) : {post_ref!r}"
             )
 
-        await self.page.wait_for_timeout(1500)
-        return await self._complete_repost(commentary, via="page post")
+        diagnostics: list[str] = []
+        for post_url in candidates:
+            logger.info("Repost UI (page post) : %s", post_url)
+
+            # Skip the navigation if we're already on that exact post page (e.g.
+            # a prior scrape_post call landed us there) — re-navigating here was
+            # what pushed failures into a multi-minute feed-card fallback tail.
+            current = self.page.url or ""
+            if post_url.rstrip("/") not in current.rstrip("/"):
+                await safe_goto(self.page, post_url, settle_ms=3500)
+            else:
+                logger.info("Déjà sur la page post, pas de nouvelle navigation")
+
+            clicked = False
+            for attempt, wait_ms in enumerate((0, 1500, 2500)):
+                if wait_ms:
+                    await self.page.wait_for_timeout(wait_ms)
+                clicked = await self.page.evaluate(CLICK_REPOST_ON_PAGE_JS)
+                if clicked:
+                    break
+                logger.info("Bouton Republier introuvable sur page post (essai %s/3)", attempt + 1)
+
+            if clicked:
+                await self.page.wait_for_timeout(1500)
+                return await self._complete_repost(commentary, via="page post")
+
+            code = await diagnose_post_page(self.page)
+            diagnostics.append(f"{post_url} → {describe_diagnostic(code)}")
+            logger.info("Repost KO sur %s : %s", post_url, code)
+            if code == "session_expired":
+                break
+
+        raise RepostUIError(
+            "Bouton Republier introuvable sur la page post. Diagnostic par URL "
+            "tentée : " + " | ".join(diagnostics)
+        )
 
     async def repost_feed_card(self, post_ref: str, commentary: str = "") -> str:
         """Repost by clicking Republier on a visible feed card (compkey-friendly)."""

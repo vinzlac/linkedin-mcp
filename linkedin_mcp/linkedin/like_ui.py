@@ -8,7 +8,12 @@ from linkedin_scraper.core import check_cooldown, enforce_write_action_pacing
 from linkedin_scraper.scrapers.feed import FEED_URL, _WAIT_FOR_FEED_JS
 
 from .browser_recovery import safe_goto
-from .repost import activity_id_from_post_ref, canonical_post_url, compkey_from_post_ref
+from .post_page import describe_diagnostic, diagnose_post_page
+from .repost import (
+    activity_id_from_post_ref,
+    compkey_from_post_ref,
+    post_url_candidates,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -84,15 +89,6 @@ class AlreadyLikedError(LikeUIError):
     """Post is already liked."""
 
 
-def _post_url(post_ref: str) -> str:
-    url = canonical_post_url(post_ref)
-    if not url:
-        raise LikeUIError(
-            f"URL ou URN invalide (activity id introuvable) : {post_ref!r}"
-        )
-    return url
-
-
 class LikeUI:
     """Like a LinkedIn post via Playwright."""
 
@@ -117,43 +113,65 @@ class LikeUI:
         )
 
     async def _like_via_post_page(self, post_ref: str) -> str:
-        post_url = _post_url(post_ref)
-        logger.info("Like UI (page post) : %s", post_url)
+        """Like via la page du post, en essayant chaque forme d'URL en cascade.
 
-        # Skip the navigation entirely if we're already sitting on that exact
-        # post page (e.g. a prior scrape_post call landed us there) — an extra
-        # goto() here is what used to send this into a multi-minute feed
-        # fallback tail if the post-page click failed for an unrelated reason.
-        current = self.page.url or ""
-        if post_url.rstrip("/") not in current.rstrip("/"):
-            await safe_goto(self.page, post_url)
-        else:
-            logger.info("Déjà sur la page post, pas de nouvelle navigation")
-
-        result = None
-        for attempt, wait_ms in enumerate((0, 1500, 2500)):
-            if wait_ms:
-                await self.page.wait_for_timeout(wait_ms)
-            result = await self.page.evaluate(CLICK_LIKE_ON_PAGE_JS)
-            if result.get("clicked") or result.get("status") == "already_liked":
-                break
-            logger.info(
-                "Bouton like introuvable sur page post (essai %s/3, status=%s)",
-                attempt + 1,
-                result.get("status"),
-            )
-
-        if result.get("status") == "already_liked":
-            raise AlreadyLikedError("Ce post est déjà liké.")
-        if not result.get("clicked"):
+        Une seule forme d'URL ne suffit pas : l'id numérique d'un permalien
+        /posts/…-share-<id>- n'est pas toujours un activity id valide, et
+        /feed/update/urn:li:activity:<id>/ peut alors rendre une page sans barre
+        d'action (rapport du 2026-09-03). On tente donc les candidats de
+        post_url_candidates() et on ne conclut à l'échec qu'après tous.
+        """
+        candidates = post_url_candidates(post_ref)
+        if not candidates:
             raise LikeUIError(
-                f"Bouton J'aime introuvable sur la page post ({result.get('status')}). "
-                "Le post n'existe peut-être plus ou la session a expiré."
+                f"URL ou URN invalide (activity id introuvable) : {post_ref!r}"
             )
 
-        await self.page.wait_for_timeout(1500)
-        logger.info("Like publié (page post)")
-        return "Post liké via Playwright (page post)."
+        diagnostics: list[str] = []
+        for post_url in candidates:
+            logger.info("Like UI (page post) : %s", post_url)
+
+            # Skip the navigation entirely if we're already sitting on that exact
+            # post page (e.g. a prior scrape_post call landed us there) — an extra
+            # goto() here is what used to send this into a multi-minute feed
+            # fallback tail if the post-page click failed for an unrelated reason.
+            current = self.page.url or ""
+            if post_url.rstrip("/") not in current.rstrip("/"):
+                await safe_goto(self.page, post_url)
+            else:
+                logger.info("Déjà sur la page post, pas de nouvelle navigation")
+
+            result = {}
+            for attempt, wait_ms in enumerate((0, 1500, 2500)):
+                if wait_ms:
+                    await self.page.wait_for_timeout(wait_ms)
+                result = await self.page.evaluate(CLICK_LIKE_ON_PAGE_JS)
+                if result.get("clicked") or result.get("status") == "already_liked":
+                    break
+                logger.info(
+                    "Bouton like introuvable sur page post (essai %s/3, status=%s)",
+                    attempt + 1,
+                    result.get("status"),
+                )
+
+            if result.get("status") == "already_liked":
+                raise AlreadyLikedError("Ce post est déjà liké.")
+            if result.get("clicked"):
+                await self.page.wait_for_timeout(1500)
+                logger.info("Like publié (page post)")
+                return "Post liké via Playwright (page post)."
+
+            code = await diagnose_post_page(self.page)
+            diagnostics.append(f"{post_url} → {describe_diagnostic(code)}")
+            logger.info("Like KO sur %s : %s", post_url, code)
+            # Session morte : aucune autre URL n'y changera quoi que ce soit.
+            if code == "session_expired":
+                break
+
+        raise LikeUIError(
+            "Bouton J'aime introuvable sur la page post. Diagnostic par URL "
+            "tentée : " + " | ".join(diagnostics)
+        )
 
     async def _like_via_feed_card(self, post_ref: str) -> str:
         compkey = compkey_from_post_ref(post_ref)
