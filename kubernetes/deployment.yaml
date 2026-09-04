@@ -1,6 +1,6 @@
 # Image GHCR — linkedin-mcp (FastMCP/uvicorn, streamable-http), port 8000, UID 1000.
 # Pas de navigateur local : scraping via CDP sur le Chromium partagé du homelab
-# (LINKEDIN_CDP_URL → IP du Service chromium-cdp-pod.openclaw, ADR-017 linkedin_scraper).
+# (LINKEDIN_CDP_URL → ClusterIP du Service chromium-cdp-host.openclaw, ADR-017).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -52,10 +52,21 @@ spec:
             # IP directe (pas le nom DNS du Service) : Chromium rejette en 500 toute
             # requête CDP dont le header Host n'est pas une IP littérale ou "localhost"
             # (protection anti DNS-rebinding intégrée, pas de flag pour la désactiver).
-            # ClusterIP du Service chromium-cdp-pod.openclaw — stable tant que le
-            # Service n'est pas supprimé/recréé. Voir post-mortem correspondant.
+            # Variante 10A (navigateur sur l'hôte) plutôt que 10B (navigateur en
+            # pod). Deux raisons, constatées le 2026-09-04 : l'image du pod est
+            # figée sur Chrome 124 (~2 ans de retard, signal d'automatisation à
+            # lui seul) et tournait en headless, ce qui a valu au compte une
+            # vérification de sécurité LinkedIn récurrente. L'hôte utilise le
+            # snap chromium, à jour, et désormais lancé en mode fenêtré sous Xvfb
+            # (k3s-homelab, playbook install-chromium-cdp-host.yml).
+            #
+            # ClusterIP et surtout PAS le nom DNS du Service : Chrome rejette
+            # toute requête CDP dont l'en-tête Host n'est ni une IP ni localhost
+            # (« Host header is specified and is not an IP address or localhost »,
+            # HTTP 500). C'est la raison de fond de cette adresse en dur, stable
+            # tant que le Service n'est pas supprimé/recréé.
             - name: LINKEDIN_CDP_URL
-              value: "http://10.43.79.244:9222"
+              value: "http://10.43.230.242:9222"
             - name: LINKEDIN_SESSION_PATH
               value: "/secrets/session/linkedin_session.json"
             - name: TOKEN_STORAGE_PATH
