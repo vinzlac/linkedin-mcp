@@ -263,7 +263,21 @@ If `scrape_feed` returns no posts in Claude Desktop but the server starts fine:
 3. **Test locally** without Claude: `uv run python test_scrape_feeds.py 5 --dir output`
 4. **Install Chromium** if Playwright complains: `uv run playwright install chromium`
 
-Post-mortem (2026-06-25, empty feed / LinkedIn icon-only Repost buttons): [docs/post-mortem/2026-06-25-scrape-feed-empty.md](docs/post-mortem/2026-06-25-scrape-feed-empty.md)
+## Post-mortems
+
+Incidents documentés (régressions DOM LinkedIn, session, déploiement) :
+
+| Date | Incident |
+|------|----------|
+| 2026-06-25 | [Feed vide — boutons Republier en icône seule](docs/post-mortem/2026-06-25-scrape-feed-empty.md) |
+| 2026-07-22 | [Hang de like/repost et rate limit LinkedIn](docs/post-mortem/2026-07-22-like-repost-hang-and-rate-limit.md) |
+| 2026-07-26 | [Passage au MCP Gateway LiteLLM sur k3s](docs/post-mortem/2026-07-26-k3s-litellm-mcp-gateway.md) |
+| 2026-08-05 | [`scrape_post` renvoyait le mauvais auteur](docs/post-mortem/2026-08-05-scrape-post-wrong-author.md) |
+| 2026-08-06 | [`repost_post` cassé côté API et côté UI](docs/post-mortem/2026-08-06-repost-broken-api-and-ui.md) |
+| 2026-08-09 | [`scrape_feed` en boucle sur un navigateur Playwright mort](docs/post-mortem/2026-08-09-scrape-feed-dead-browser-singleton.md) |
+| 2026-09-03 | [`urn` inutilisable et actions UI en échec sur un URN](docs/post-mortem/2026-09-03-feed-report-urn-and-ui-actions.md) |
+
+Les décisions d'architecture correspondantes sont dans [docs/adr/](docs/adr/README.md).
 
 ## Limitations
 
