@@ -7,7 +7,17 @@ on:
   push:
     branches: [main]
     paths-ignore:
+      # Commits GitOps de ce workflow lui-même : évite la boucle de rebuild.
       - "kubernetes/**"
+      # Documentation : ne change pas l'image, ne justifie pas un redéploiement
+      # du pod. Constaté le 2026-09-04 — une PR purement documentaire (ADR +
+      # post-mortem) a déclenché un build complet et recyclé le pod de prod.
+      - "docs/**"
+      # README.md est copié dans l'image (pyproject `readme = "README.md"`, donc
+      # requis par le build) : l'ignorer ici fait que le README embarqué dans
+      # l'image peut retarder d'un commit sur celui du repo. Sans conséquence —
+      # il ne sert que de métadonnée de package — et rattrapé au build suivant.
+      - "README.md"
   workflow_dispatch:
 
 concurrency:
