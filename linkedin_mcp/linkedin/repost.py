@@ -17,6 +17,10 @@ ACTIVITY_ID_PATTERN = re.compile(r"urn:li:activity:(\d+)")
 _POSTS_URL_PATTERN = re.compile(r"/posts/[^/]+-(\d{16,})-[A-Za-z0-9]+/?")
 COMPKEY_URN_PATTERN = re.compile(r"urn:li:compkey:(.+)", re.I)
 _FULL_POST_URL_PATTERN = re.compile(r"^https?://(www\.)?linkedin\.com/(posts/|feed/update/)", re.I)
+# Formes d'URN acceptées par /feed/update/ pour un même id numérique. LinkedIn
+# n'en rend qu'une correctement selon la nature du post (post natif, repost,
+# ugcPost) — d'où l'essai en cascade côté UI.
+_POST_URN_FORMS = ("activity", "ugcPost", "share")
 
 
 class RepostError(Exception):
@@ -48,26 +52,51 @@ def activity_id_from_post_ref(post_ref: str) -> Optional[str]:
     return None
 
 
-def canonical_post_url(post_ref: str) -> Optional[str]:
-    """URL to navigate to for like/repost UI actions.
+def post_url_candidates(post_ref: str) -> list[str]:
+    """URLs de navigation à tenter, dans l'ordre, pour une action UI (like/repost).
 
-    Prefers the original URL as given when it's already a full LinkedIn post
-    permalink (/posts/... or /feed/update/...). The numeric id embedded in a
-    /posts/{slug}-{id}-{suffix}/ permalink is a share or ugcPost id, which is
-    NOT always a valid urn:li:activity: id — reconstructing
-    /feed/update/urn:li:activity:{that_id}/ from it can land on a "Post
-    introuvable" page even though the original permalink loads fine. Only
-    synthesize a feed/update URL when there's no full URL to begin with
-    (a bare URN or numeric activity id).
+    Le id numérique d'un permalien /posts/{slug}-{id}-{suffix}/ est un share ou
+    ugcPost id, qui n'est PAS toujours un urn:li:activity: valide : reconstruire
+    /feed/update/urn:li:activity:{id}/ à partir de là peut atterrir sur une page
+    sans barre d'action, alors que le permalien d'origine se charge très bien.
+
+    C'est exactement le mode d'échec du rapport du 2026-09-03 : appelé avec
+    l'URN reconstruit depuis un slug `-share-`, like_post/repost_post ne
+    trouvaient aucun bouton, tandis que l'URL /posts/ complète fonctionnait.
+
+    D'où une cascade plutôt qu'une URL unique :
+    1. l'URL fournie telle quelle si c'en est déjà une (elle est faite pour marcher) ;
+    2. les trois formes d'URN sur /feed/update/ (activity, ugcPost, share) —
+       seule la bonne rend la barre d'action.
+
+    Limite assumée : un id numérique nu ne dit pas de quel type d'entité il
+    relève, et les espaces d'ids activity / share / ugcPost sont distincts. Rien
+    ne garantit donc formellement que les trois formes désignent le même post.
+    Cette ambiguïté est inhérente à l'entrée, pas à la cascade (l'ancien code la
+    portait déjà en ne tentant que la forme activity). Pour une action d'écriture
+    sûre, passer le permalien complet (`linkedin_url` de scrape_feed) plutôt
+    qu'un URN reconstruit : il est alors tenté en premier et lève l'ambiguïté.
     """
     ref = post_ref.strip()
+    candidates: list[str] = []
+
     if _FULL_POST_URL_PATTERN.match(ref):
-        return ref.split("?")[0].split("#")[0]
+        candidates.append(ref.split("?")[0].split("#")[0])
 
     activity_id = activity_id_from_post_ref(ref)
-    if not activity_id:
-        return None
-    return f"https://www.linkedin.com/feed/update/urn:li:activity:{activity_id}/"
+    if activity_id:
+        for urn_form in _POST_URN_FORMS:
+            candidates.append(
+                f"https://www.linkedin.com/feed/update/urn:li:{urn_form}:{activity_id}/"
+            )
+
+    return list(dict.fromkeys(candidates))
+
+
+def canonical_post_url(post_ref: str) -> Optional[str]:
+    """Première URL à tenter pour une action UI (voir post_url_candidates)."""
+    candidates = post_url_candidates(post_ref)
+    return candidates[0] if candidates else None
 
 
 def compkey_from_post_ref(post_ref: str) -> Optional[str]:

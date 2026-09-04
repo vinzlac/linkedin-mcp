@@ -471,7 +471,8 @@ async def repost_post(
     reposte via l'UI web et la session Playwright (create_scrape_session).
 
     Args:
-        post_url: URL du post (feed/update/urn:li:activity:...) ou URN activity
+        post_url: URL du post (feed/update/urn:li:activity:...) ou URN activity.
+            Préférer le permalien complet renvoyé par scrape_feed (`linkedin_url`) : un URN reconstruit depuis un slug peut porter un share/ugcPost id, ambigu pour la navigation.
         commentary: Commentaire optionnel ajouté au repost
         visibility: PUBLIC ou CONNECTIONS (API uniquement ; ignoré en fallback UI)
 
@@ -549,7 +550,8 @@ async def repost_post_scrape(
     N'utilise pas l'API OAuth. Nécessite create_scrape_session.
 
     Args:
-        post_url: URL du post ou urn:li:activity:ID
+        post_url: URL du post ou urn:li:activity:ID.
+            Préférer le permalien complet renvoyé par scrape_feed (`linkedin_url`) : un URN reconstruit depuis un slug peut porter un share/ugcPost id, ambigu pour la navigation.
         commentary: Commentaire optionnel (vide = repost instantané)
 
     Returns:
@@ -589,6 +591,7 @@ async def like_post(
 
     Args:
         post_url: URL du post, urn:li:activity:ID, ou urn:li:compkey:…
+            Préférer le permalien complet renvoyé par scrape_feed (`linkedin_url`) : un URN reconstruit depuis un slug peut porter un share/ugcPost id, ambigu pour la navigation.
 
     Returns:
         Message de succès ou indication que le post est déjà liké.

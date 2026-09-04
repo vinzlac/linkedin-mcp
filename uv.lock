@@ -374,7 +374,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "httpx", specifier = ">=0.28.1" },
-    { name = "linkedin-playwright-scraper", specifier = ">=4.3.0" },
+    { name = "linkedin-playwright-scraper", specifier = ">=4.4.0" },
     { name = "mcp", extras = ["cli"], specifier = ">=1.6.0" },
     { name = "prometheus-client", specifier = ">=0.21.0" },
     { name = "pydantic", specifier = ">=2.10.5" },
@@ -385,7 +385,7 @@ requires-dist = [
 
 [[package]]
 name = "linkedin-playwright-scraper"
-version = "4.3.0"
+version = "4.4.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiofiles" },
@@ -395,9 +395,9 @@ dependencies = [
     { name = "python-dotenv" },
     { name = "requests" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/6a/06/07d2db358545e404085f74a57a0ea3cd8e61b6bed079cf674656718c535a/linkedin_playwright_scraper-4.3.0.tar.gz", hash = "sha256:ee4d3f48d079103c3a570176ae2a08f08dce53c61b107e134c2fdcaa5716598d", size = 253577, upload-time = "2026-09-02T09:58:19.227Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/b1/cd/2a29f0ca15140ca3462f72d56778d99ffb597e99d3835a4d7e9ae96d36e2/linkedin_playwright_scraper-4.4.0.tar.gz", hash = "sha256:2a8ba2ce107c77d145e2cf8e24a74fec5549a68187c54995f0939bea1f765783", size = 266378, upload-time = "2026-09-03T15:45:17.411Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/11/80/3eafc096a6d013b868cb6235d1f2e195b66949423d754ce9d132192a78a1/linkedin_playwright_scraper-4.3.0-py3-none-any.whl", hash = "sha256:14b1cc7994c2023ca11771065a969f6a1998e76fbc347dc877bf1a5cb1037b57", size = 91756, upload-time = "2026-09-02T09:58:17.878Z" },
+    { url = "https://files.pythonhosted.org/packages/d7/e7/6056fdc10bc32906fd418bcfe4d78d7b4f8bbb63cf6f94eacebfd77d0648/linkedin_playwright_scraper-4.4.0-py3-none-any.whl", hash = "sha256:a4edabb5fab0b2ec11ad318fedad08530fe442da41d3b8e7a235b8055b56f15f", size = 96580, upload-time = "2026-09-03T15:45:16.158Z" },
 ]
 
 [[package]]
