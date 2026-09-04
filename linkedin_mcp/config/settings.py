@@ -81,6 +81,22 @@ class Settings(BaseSettings):
 
     Ignored entirely when LINKEDIN_CDP_URL is set.
     """
+    LINKEDIN_PERSISTENT_CONTEXT: bool = (
+        os.getenv("LINKEDIN_PERSISTENT_CONTEXT", "true").lower() != "false"
+    )
+    """Réutiliser le profil du navigateur CDP au lieu d'un contexte isolé.
+
+    Un contexte neuf est l'équivalent d'une fenêtre de navigation privée :
+    LinkedIn y voit un appareil inconnu et redemande une vérification de
+    sécurité. Le 2026-09-04, cela s'est traduit par un identifiant de challenge
+    différent à chaque scrape, quels que soient la session, l'IP ou la version
+    du navigateur. Le profil persistant donne un appareil stable, condition pour
+    qu'une vérification résolue une fois tienne.
+
+    Sans effet quand LINKEDIN_CDP_URL est vide. À laisser à false si le
+    navigateur CDP est partagé avec d'autres usages que le scraping LinkedIn :
+    les cookies vivent alors dans son profil.
+    """
     LINKEDIN_CDP_URL: str = os.getenv("LINKEDIN_CDP_URL", "")
     """Connect to an existing Chromium over CDP instead of launching a local
     one — e.g. "http://192.168.1.153:9222" for the homelab's

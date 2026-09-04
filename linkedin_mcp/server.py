@@ -168,7 +168,11 @@ async def _get_browser() -> BrowserManager:
         )
 
     cdp_url = settings.LINKEDIN_CDP_URL or None
-    _browser_manager = BrowserManager(headless=settings.LINKEDIN_HEADLESS, cdp_url=cdp_url)
+    _browser_manager = BrowserManager(
+        headless=settings.LINKEDIN_HEADLESS,
+        cdp_url=cdp_url,
+        persistent_context=bool(cdp_url) and settings.LINKEDIN_PERSISTENT_CONTEXT,
+    )
     try:
         await _browser_manager.start()
         await _browser_manager.load_session(session_path)
