@@ -1,5 +1,6 @@
 """MCP server for LinkedIn integration."""
 import asyncio
+import functools
 import json
 import logging
 import os
@@ -85,6 +86,90 @@ _browser_initialized: bool = False
 # point of view (e.g. an unexpected LinkedIn UI state or an added navigation
 # step upstream stacking waits past what the client itself is willing to wait).
 _UI_ACTION_TIMEOUT_S = 100
+
+# --- Sérialisation des accès au navigateur ---------------------------------
+#
+# Le serveur ne dispose que d'un navigateur, d'un contexte et d'un onglet,
+# partagés par tous les outils et tous les appelants — la tâche planifiée de
+# scraping comme le service linkedin-sync, qui interroge ce MCP en boucle.
+# Sans verrou, deux appels simultanés naviguent dans la même page.
+#
+# Observé le 2026-09-04 : un cycle de linkedin-sync est tombé au milieu d'un
+# scrape, la sonde de vivacité a trouvé la page occupée, en a conclu que le
+# navigateur était mort et l'a relancé — emportant le scrape avec lui.
+# Créé paresseusement : un `asyncio.Lock` construit à l'import se lie à la
+# boucle d'événements de son premier usage et devient inutilisable si une autre
+# boucle prend le relais (« is bound to a different event loop »).
+_browser_lock: "asyncio.Lock | None" = None
+_browser_lock_loop = None
+
+
+def _get_browser_lock() -> asyncio.Lock:
+    """Verrou d'accès au navigateur, attaché à la boucle courante."""
+    global _browser_lock, _browser_lock_loop
+    loop = asyncio.get_running_loop()
+    if _browser_lock is None or _browser_lock_loop is not loop:
+        _browser_lock = asyncio.Lock()
+        _browser_lock_loop = loop
+    return _browser_lock
+
+# Budget d'attente du verrou, par nature d'appel. Un sondage périodique
+# s'efface devant un travail utile : il repassera au cycle suivant, alors
+# qu'un scrape déclenché par un humain ou par une tâche planifiée mérite
+# d'attendre son tour.
+_LOCK_WAIT_POLL_S = 5
+_LOCK_WAIT_WORK_S = 60
+
+# Borne sur le DÉTENTEUR du verrou. Sans elle, une opération partie en vrille
+# le garderait indéfiniment : on aurait remplacé une collision par un
+# interblocage. `scrape_feed` n'avait jusqu'ici aucun délai maximal.
+_BROWSER_OP_TIMEOUT_S = 300
+
+
+class BrowserBusyError(RuntimeError):
+    """Le navigateur partagé est occupé par une autre opération LinkedIn."""
+
+
+def serialize_browser_access(*, wait_s: float, timeout_s: float = _BROWSER_OP_TIMEOUT_S):
+    """Sérialise les outils qui pilotent le navigateur partagé.
+
+    L'attente est *bornée* : l'appelant obtient son tour, ou une erreur
+    explicite. Un blocage sans limite finirait en délai d'attente côté client,
+    sans que personne ne sache pourquoi.
+
+    Le serveur reste disponible pendant l'attente : `asyncio.Lock` suspend la
+    coroutine, pas la boucle d'événements — les métriques, les autres sessions
+    MCP et les sondes de santé continuent d'être servies.
+
+    Args:
+        wait_s: temps maximal d'attente du verrou avant d'abandonner.
+        timeout_s: temps maximal d'exécution une fois le verrou obtenu.
+    """
+
+    def decorator(func):
+        @functools.wraps(func)
+        async def wrapper(*args, **kwargs):
+            lock = _get_browser_lock()
+            try:
+                await asyncio.wait_for(lock.acquire(), timeout=wait_s)
+            except asyncio.TimeoutError:
+                logger.info(
+                    "%s : navigateur occupé, abandon après %ss d'attente",
+                    func.__name__, wait_s,
+                )
+                raise BrowserBusyError(
+                    "Navigateur LinkedIn occupé par une autre opération "
+                    f"(attente de {wait_s:g}s dépassée). Réessaie dans un instant."
+                ) from None
+            try:
+                return await asyncio.wait_for(func(*args, **kwargs), timeout=timeout_s)
+            finally:
+                lock.release()
+
+        return wrapper
+
+    return decorator
+
 
 
 async def _close_browser_singleton() -> None:
@@ -463,6 +548,7 @@ async def create_post(
 
 @mcp.tool()
 @track_tool_calls
+@serialize_browser_access(wait_s=_LOCK_WAIT_WORK_S)
 async def repost_post(
     post_url: str,
     commentary: str = "",
@@ -544,6 +630,7 @@ async def repost_post(
 
 @mcp.tool()
 @track_tool_calls
+@serialize_browser_access(wait_s=_LOCK_WAIT_WORK_S)
 async def repost_post_scrape(
     post_url: str,
     commentary: str = "",
@@ -584,6 +671,7 @@ async def repost_post_scrape(
 
 @mcp.tool()
 @track_tool_calls
+@serialize_browser_access(wait_s=_LOCK_WAIT_WORK_S)
 async def like_post(
     post_url: str,
     ctx: Context = None,
@@ -893,6 +981,7 @@ async def set_scrape_session_json(session_json: str, ctx: Context = None) -> str
 
 @mcp.tool()
 @track_tool_calls
+@serialize_browser_access(wait_s=_LOCK_WAIT_WORK_S)
 async def scrape_post(post_url: str, ctx: Context = None) -> str:
     """Lit un post LinkedIn précis depuis son URL.
 
@@ -938,6 +1027,7 @@ async def scrape_post(post_url: str, ctx: Context = None) -> str:
 
 @mcp.tool()
 @track_tool_calls
+@serialize_browser_access(wait_s=_LOCK_WAIT_WORK_S)
 async def scrape_feed(count: int = 10, ctx: Context = None) -> str:
     """Lit les N premiers posts du feed LinkedIn de l'utilisateur connecté.
 
@@ -985,6 +1075,7 @@ async def scrape_feed(count: int = 10, ctx: Context = None) -> str:
 
 @mcp.tool()
 @track_tool_calls
+@serialize_browser_access(wait_s=_LOCK_WAIT_POLL_S)
 async def list_pending_invitations(limit: int = 20, ctx: Context = None) -> str:
     """Liste les invitations reçues en attente (My Network).
 
@@ -1043,6 +1134,7 @@ async def list_pending_invitations(limit: int = 20, ctx: Context = None) -> str:
 
 @mcp.tool()
 @track_tool_calls
+@serialize_browser_access(wait_s=_LOCK_WAIT_WORK_S)
 async def accept_invitation(invitation_id: str, ctx: Context = None) -> str:
     """Accepte une invitation LinkedIn en attente.
 
@@ -1079,6 +1171,7 @@ async def accept_invitation(invitation_id: str, ctx: Context = None) -> str:
 
 @mcp.tool()
 @track_tool_calls
+@serialize_browser_access(wait_s=_LOCK_WAIT_WORK_S)
 async def ignore_invitation(invitation_id: str, ctx: Context = None) -> str:
     """Ignore / refuse une invitation LinkedIn en attente.
 
@@ -1115,6 +1208,7 @@ async def ignore_invitation(invitation_id: str, ctx: Context = None) -> str:
 
 @mcp.tool()
 @track_tool_calls
+@serialize_browser_access(wait_s=_LOCK_WAIT_POLL_S)
 async def list_recent_conversations(limit: int = 20, ctx: Context = None) -> str:
     """Liste les conversations récentes de la messagerie LinkedIn.
 
@@ -1158,6 +1252,7 @@ async def list_recent_conversations(limit: int = 20, ctx: Context = None) -> str
 
 @mcp.tool()
 @track_tool_calls
+@serialize_browser_access(wait_s=_LOCK_WAIT_POLL_S)
 async def get_conversation(
     conversation_id: str, limit: int = 50, ctx: Context = None
 ) -> str:
@@ -1201,6 +1296,7 @@ async def get_conversation(
 
 @mcp.tool()
 @track_tool_calls
+@serialize_browser_access(wait_s=_LOCK_WAIT_WORK_S)
 async def send_message(
     conversation_id: str, text: str, ctx: Context = None
 ) -> str:
