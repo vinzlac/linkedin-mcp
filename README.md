@@ -119,6 +119,9 @@ By default, `LINKEDIN_SESSION_PATH` is per-user (outside the repo):
 - Linux: `~/.local/state/linkedin-mcp/linkedin_session.json`
 - Windows: `%APPDATA%\\linkedin-mcp\\linkedin_session.json`
 
+Full runbook (create, verify, ship to k3s, renew, security):
+[docs/session-linkedin.md](docs/session-linkedin.md).
+
 ## Claude Desktop Configuration
 
 Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
