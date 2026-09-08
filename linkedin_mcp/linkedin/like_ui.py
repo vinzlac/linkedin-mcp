@@ -1,6 +1,5 @@
 """Like LinkedIn posts via Playwright UI."""
 import logging
-import re
 
 from playwright.async_api import Page, TimeoutError as PlaywrightTimeoutError
 
@@ -18,32 +17,50 @@ from .repost import (
 
 logger = logging.getLogger(__name__)
 
-# Matches the like button when the post is NOT yet liked (FR/EN)
-_LIKE_BTN_PATTERN = re.compile(
-    r"(État du bouton de réaction\s*[:\xa0]+\s*aucune réaction"
-    r"|reaction button\s*[:\xa0]*\s*no reaction"
-    r"|état.*aucune"
-    r"|réaction.*aucune)",
-    re.I,
-)
-
-# Matches the like button when already liked (to detect already-liked state)
-_ALREADY_LIKED_PATTERN = re.compile(
-    r"(État du bouton de réaction\s*[:\xa0]+\s*J.aime"
-    r"|État du bouton de réaction\s*[:\xa0]+\s*Like"
-    r"|reaction button\s*[:\xa0]*\s*like)",
-    re.I,
-)
+# Fonctions partagées par les deux variantes de clic (page post et carte feed).
+#
+# Rendu de septembre 2026, relevé sur une vraie page post le 2026-09-07 :
+#   texte « J’aime », aria-pressed="false", aria-label « Réagir avec “J’aime” »
+# L'ancien libellé (« État du bouton de réaction : aucune réaction ») a disparu.
+#
+# On s'appuie donc sur `aria-pressed`, attribut standard et indépendant de la
+# langue, plutôt que sur une phrase française traduite. L'ancien motif reste en
+# repli tant que des surfaces ne sont pas migrées.
+#
+# DANGER : chaque commentaire porte son propre bouton J'aime, au libellé presque
+# identique (« Réagir avec “J’aime” au commentaire de X »). Les exclure est le
+# point le plus important de ce code — liker un commentaire à la place du post
+# est une écriture fausse, silencieuse, sur le compte de l'utilisateur. En cas de
+# doute on renvoie `button_not_found` : un échec vaut mieux qu'une mauvaise action.
+_LIKE_HELPERS_JS = """
+  var LEGACY_LIKE = /État du bouton de réaction[\\s\\xa0]*[:\\xa0]+[\\s\\xa0]*aucune réaction/i;
+  var LEGACY_LIKED = /État du bouton de réaction[\\s\\xa0]*[:\\xa0]+[\\s\\xa0]*(J.aime|Like)/i;
+  var COMMENT_RE = /au commentaire|to .*comment|sur le commentaire/i;
+  var REACT_RE = /r[ée]agir avec|react with/i;
+  function _lbl(b) { return (b.getAttribute("aria-label") || "").trim(); }
+  function _txt(b) { return (b.innerText || "").trim(); }
+  // « J’aime » avec apostrophe typographique comme droite, et « Like ».
+  function _isLikeWord(t) { return /^(j.aime|like)$/i.test(t); }
+  function likeState(b) {
+    var a = _lbl(b), t = _txt(b);
+    if (COMMENT_RE.test(a)) return null;              // jamais le bouton d'un commentaire
+    if (b.hasAttribute("aria-pressed") && (REACT_RE.test(a) || _isLikeWord(t))) {
+      return b.getAttribute("aria-pressed") === "true" ? "liked" : "like";
+    }
+    if (LEGACY_LIKED.test(a)) return "liked";
+    if (LEGACY_LIKE.test(a)) return "like";
+    return null;
+  }
+"""
 
 CLICK_LIKE_ON_PAGE_JS = """
 () => {
-  var like_re = /État du bouton de réaction[\\s\\xa0]*[:\\xa0]+[\\s\\xa0]*aucune réaction/i;
-  var liked_re = /État du bouton de réaction[\\s\\xa0]*[:\\xa0]+[\\s\\xa0]*(J.aime|Like)/i;
+""" + _LIKE_HELPERS_JS + """
   var btns = Array.from(document.querySelectorAll("button"));
   for (var i = 0; i < btns.length; i++) {
-    var a = (btns[i].getAttribute("aria-label") || "").trim();
-    if (liked_re.test(a)) return { clicked: false, status: "already_liked" };
-    if (like_re.test(a)) { btns[i].click(); return { clicked: true }; }
+    var state = likeState(btns[i]);
+    if (state === "liked") return { clicked: false, status: "already_liked" };
+    if (state === "like") { btns[i].click(); return { clicked: true }; }
   }
   return { clicked: false, status: "button_not_found" };
 }
@@ -51,8 +68,7 @@ CLICK_LIKE_ON_PAGE_JS = """
 
 CLICK_LIKE_IN_CARD_JS = """
 ({ mode, value }) => {
-  var like_re = /État du bouton de réaction[\\s\\xa0]*[:\\xa0]+[\\s\\xa0]*aucune réaction/i;
-  var liked_re = /État du bouton de réaction[\\s\\xa0]*[:\\xa0]+[\\s\\xa0]*(J.aime|Like)/i;
+""" + _LIKE_HELPERS_JS + """
   function cardRoot(el) {
     return el.closest("div[data-urn], article, .feed-shared-update-v2") || el;
   }
@@ -73,9 +89,9 @@ CLICK_LIKE_IN_CARD_JS = """
   if (!card) return { clicked: false, status: "card_not_found" };
   var btns = Array.from(card.querySelectorAll("button"));
   for (var j = 0; j < btns.length; j++) {
-    var a = (btns[j].getAttribute("aria-label") || "").trim();
-    if (liked_re.test(a)) return { clicked: false, status: "already_liked" };
-    if (like_re.test(a)) { btns[j].click(); return { clicked: true }; }
+    var state = likeState(btns[j]);
+    if (state === "liked") return { clicked: false, status: "already_liked" };
+    if (state === "like") { btns[j].click(); return { clicked: true }; }
   }
   return { clicked: false, status: "button_not_found" };
 }
