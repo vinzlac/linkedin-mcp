@@ -137,6 +137,34 @@ class RepostUIError(Exception):
     """Raised when Playwright repost fails."""
 
 
+# Toast de REFUS : LinkedIn rejette un repost en double. Testé AVANT le succès,
+# parce que « Ce post a déjà été créé » contient « créé » — un motif de succès
+# trop large classerait un refus en publication.
+_TOAST_ALREADY = re.compile(
+    r"déjà été (?:créé|publié|partagé)|déjà republié|already (?:reposted|shared)|"
+    r"already been (?:created|posted)",
+    re.I,
+)
+_TOAST_PUBLISHED = re.compile(r"repub|repost|réussi|success|publié|partagé", re.I)
+_TOAST_FAILED = re.compile(r"erreur|error|échec|impossible|failed|réessayer", re.I)
+
+
+def classify_repost_toast(text: str) -> str:
+    """`already`, `failed`, `published` ou `unknown` à partir du texte du toast.
+
+    Fonction pure, isolée pour être vérifiable sans navigateur : c'est ici que
+    se jouait l'incident du 2026-09-07, où le même post a été reposté deux fois
+    et où le refus a été rapporté comme une publication.
+    """
+    if _TOAST_ALREADY.search(text):
+        return "already"
+    if _TOAST_FAILED.search(text):
+        return "failed"
+    if _TOAST_PUBLISHED.search(text):
+        return "published"
+    return "unknown"
+
+
 def normalize_post_url(post_ref: str) -> str:
     """Return a navigable URL from a post URL, URN, or activity id."""
     url = canonical_post_url(post_ref)
@@ -281,11 +309,21 @@ class RepostUI:
         else:
             result = await self._repost_instant()
 
-        if not await self._verify_repost_published():
+        outcome = await self._verify_repost_published()
+
+        if outcome == "failed":
             raise RepostUIError(
-                "Le clic repost a été effectué mais aucune confirmation LinkedIn "
-                "n'a été détectée — le repost n'a probablement pas été publié."
+                "Le clic repost a été effectué mais LinkedIn a signalé un échec "
+                "— le repost n'a pas été publié."
             )
+        if outcome == "already":
+            # Ce n'est pas une erreur : le post EST republié, simplement pas par
+            # cet appel-ci. L'appelant doit pouvoir le distinguer d'une
+            # publication, sinon un doublon reste invisible des deux côtés.
+            logger.warning("Repost refusé par LinkedIn : le post était déjà republié")
+            return f"Repost déjà existant : LinkedIn a refusé le doublon ({via})"
+        if outcome == "unconfirmed":
+            return f"{result} — issue NON CONFIRMÉE, aucun toast LinkedIn observé ({via})"
         return f"{result} ({via})"
 
     async def _repost_instant(self) -> str:
@@ -354,30 +392,60 @@ class RepostUI:
         await self.page.wait_for_timeout(2500)
         return "Repost publié via Playwright (avec commentaire)"
 
-    async def _verify_repost_published(self) -> bool:
-        for selector in (
-            ".artdeco-toast-item",
-            "[data-test-artdeco-toast-item-type]",
-            ".artdeco-toast-item__message",
-        ):
-            try:
-                await self.page.wait_for_selector(selector, timeout=8000)
-                text = await self.page.locator(selector).first.inner_text()
-                logger.info("Toast repost : %s", text[:120])
-                if re.search(r"repub|repost|success|réussi|publi", text, re.I):
-                    return True
-            except PlaywrightTimeoutError:
-                continue
+    async def _verify_repost_published(self) -> str:
+        """État observé après le clic : voir `classify_repost_toast`.
+
+        Renvoie `published`, `already`, `unconfirmed` ou `failed` — jamais un
+        booléen. C'est la distinction `already` qui manquait : LinkedIn REFUSE
+        un repost en double avec un toast explicite, que l'ancienne version
+        lisait, journalisait, puis ignorait faute de correspondre à sa regex de
+        succès — pour conclure au succès par défaut juste après.
+        """
+        toast = await self._read_toast()
+        if toast is not None:
+            outcome = classify_repost_toast(toast)
+            logger.info("Toast repost : %s → %s", toast[:120], outcome)
+            if outcome != "unknown":
+                return outcome
 
         menu_open = await self.page.locator("div[role='button']").filter(
             has_text=re.compile(r"Diffusez instantan", re.I)
         ).count()
-        if menu_open == 0:
-            error = self.page.locator(".artdeco-inline-feedback--error")
-            if await error.count() == 0:
-                logger.warning(
-                    "Pas de toast repost détecté ; confirmation faible uniquement"
-                )
-                return True
+        if menu_open > 0:
+            logger.warning("Menu Republier toujours ouvert : le repost n'est pas parti")
+            return "failed"
 
-        return False
+        if await self.page.locator(".artdeco-inline-feedback--error").count() > 0:
+            logger.warning("Erreur inline affichée après le clic repost")
+            return "failed"
+
+        # Aucun signal exploitable. Le repost instantané ne produit pas de toast
+        # de succès observable (constat sur 8 reposts consécutifs des 02→09
+        # septembre 2026 : aucun toast, alors que le toast de REFUS, lui, est
+        # bien lu). On ne peut donc ni confirmer ni infirmer — et c'est cette
+        # incertitude qu'il faut remonter, pas un succès inventé.
+        logger.warning(
+            "Aucune confirmation LinkedIn observable ; issue non confirmée"
+        )
+        return "unconfirmed"
+
+    async def _read_toast(self) -> str | None:
+        """Texte du premier toast affiché, ou None.
+
+        Un seul `wait_for_selector` sur les trois formes : les enchaîner coûtait
+        jusqu'à 24 s (3 × 8 s) quand aucun toast n'apparaît, soit la majorité
+        des cas — sur un budget d'appel qui était de 60 s côté client.
+        """
+        selector = (
+            ".artdeco-toast-item, [data-test-artdeco-toast-item-type], "
+            ".artdeco-toast-item__message"
+        )
+        try:
+            await self.page.wait_for_selector(selector, timeout=8000)
+        except PlaywrightTimeoutError:
+            return None
+        try:
+            return await self.page.locator(selector).first.inner_text()
+        except Exception as exc:  # lecture best-effort : ne masque pas l'issue
+            logger.debug("Toast présent mais illisible : %s", exc)
+            return None

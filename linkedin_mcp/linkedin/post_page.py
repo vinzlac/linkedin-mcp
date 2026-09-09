@@ -39,8 +39,13 @@ POST_PAGE_STATE_JS = """
 () => {
   var url = location.href;
   var text = ((document.body && document.body.innerText) || "").slice(0, 4000);
-  var loggedOut = /\\/(login|authwall|checkpoint|uas\\/login)/i.test(url) ||
-                  !!document.querySelector('input[name="session_key"]');
+  // Deux signaux distincts, remontes separement : le 2026-09-04, quatre
+  // `session_expired` d'affilee ont ete conclus alors que la session etait
+  // valide (le like a reussi 2 min plus tard, meme session). Sans savoir
+  // LEQUEL des deux a declenche, le faux positif n'est pas diagnosticable.
+  var loginUrl = /\\/(login|authwall|checkpoint|uas\\/login)/i.test(url);
+  var sessionKeyInput = !!document.querySelector('input[name="session_key"]');
+  var loggedOut = loginUrl || sessionKeyInput;
   var notFoundRe = new RegExp(
     "page introuvable|post introuvable|contenu introuvable|" +
     "n'est plus disponible|n'est pas disponible|page n'existe pas|" +
@@ -55,7 +60,9 @@ POST_PAGE_STATE_JS = """
     return /^(Republier|Repost)\\b/i.test(a) ||
            /bouton de r\\u00e9action|reaction button/i.test(a);
   });
-  return { url: url, loggedOut: loggedOut, notFound: notFound, hasActionBar: hasActionBar };
+  return { url: url, loggedOut: loggedOut, loginUrl: loginUrl,
+           sessionKeyInput: sessionKeyInput, notFound: notFound,
+           hasActionBar: hasActionBar };
 }
 """
 
@@ -75,6 +82,16 @@ async def diagnose_post_page(page) -> str:
     if not isinstance(state, dict):
         return "probe_failed"
     if state.get("loggedOut"):
+        # Conclure a une session morte fait abandonner la cascade d'URL : le
+        # cout d'un faux positif est un engagement perdu. On journalise donc
+        # l'URL observee et le signal declencheur, sans quoi le cas n'est pas
+        # rejouable a posteriori.
+        logger.warning(
+            "session_expired conclu — url=%s loginUrl=%s sessionKeyInput=%s",
+            state.get("url"),
+            state.get("loginUrl"),
+            state.get("sessionKeyInput"),
+        )
         return "session_expired"
     if state.get("notFound"):
         return "post_not_found"
