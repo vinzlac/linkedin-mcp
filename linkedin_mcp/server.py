@@ -646,7 +646,15 @@ async def repost_post_scrape(
         commentary: Commentaire optionnel (vide = repost instantané)
 
     Returns:
-        Message de succès
+        Un message qui distingue trois issues, à lire par l'appelant :
+        - « Repost publié … » : confirmé par un toast LinkedIn ;
+        - « Repost déjà existant … » : LinkedIn a REFUSÉ le doublon, le post
+          était déjà republié — ce n'est pas une erreur, mais ce n'est pas cet
+          appel qui l'a publié ;
+        - « … issue NON CONFIRMÉE … » : le clic est parti, aucun toast n'a été
+          observé. Le repost instantané n'en produit pas de façon fiable ; on
+          remonte l'incertitude plutôt qu'un succès supposé.
+        Une exception n'est levée que si LinkedIn signale explicitement un échec.
     """
     logger.info("Repost Playwright post_url=%s", post_url)
     try:
