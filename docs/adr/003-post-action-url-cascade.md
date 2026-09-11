@@ -74,10 +74,45 @@ Les docstrings des outils MCP recommandent explicitement de passer le `linkedin_
 - Un échec complet coûte désormais jusqu'à 4 navigations au lieu d'une (~30 s au lieu de ~8 s). C'est le prix à payer pour ne plus échouer sur un cas qui aurait réussi ; le chemin nominal (URL complète en premier candidat) reste à une seule navigation.
 - La sonde d'état ajoute un `page.evaluate` par candidat en échec, et repose sur des libellés FR/EN (« page introuvable », « isn't available »…) : une session dans une troisième langue retomberait sur `action_bar_absent` plutôt que `post_not_found`. Dégradation acceptable — la conduite à tenir est la même dans les deux cas.
 
+## Mesures du 2026-09-11 — la cascade est devenue le cas courant
+
+Sept engagements relevés dans les logs du 02 au 11 septembre 2026 :
+
+| Post | Issue |
+|---|---|
+| `7498740981190782976` | `activity` du premier coup |
+| `7502849144177303552` | `activity` du premier coup |
+| `7501579838315593729` | `activity` du premier coup |
+| `7501459415783374849` | `activity` → `action_bar_absent`, **`ugcPost` réussit** |
+| `7503445376373510145` | `activity` → `action_bar_absent`, **`ugcPost` réussit** |
+| `7503484975909060608` | `activity` → `action_bar_absent`, **`ugcPost` réussit** |
+| `7502470817360879616` | les **trois** formes échouent au like (`action_bar_present` puis `absent`) ; le repost passe en `activity` |
+
+Trois enseignements :
+
+1. **La forme qui marche dépend du post, pas d'une bascule globale.** Il n'y a
+   donc rien à « migrer » vers `ugcPost` : la cascade reste nécessaire.
+2. **Le coût est devenu récurrent**, pas exceptionnel : près d'une action sur
+   deux paie les trois essais avant de basculer, soit 10 à 35 s.
+3. **La famille n'est pas récupérable en amont.** L'appelant
+   (`linkedin-feed-scrapping`) a vérifié que ses sept posts sont TOUS collectés
+   en `urn:li:activity:`, y compris ceux où cette forme échoue à l'action.
+   Transporter la famille scrapée transporterait donc exactement celle qui
+   échoue — question tranchée de son côté, voir `apps/worker/src/domain/identity.ts`.
+
+**Piste ouverte** : mémoriser par post la forme qui a fonctionné, pour ne pas
+repayer les trois essais à chaque action sur le même contenu.
+
+Autre observation, non résolue : `scrape_post` sur une URL `ugcPost` renvoie une
+réponse **vide** pour un post pourtant vivant et lisible par sa forme
+`activity`. L'URL `ugcPost` expose donc parfois une barre d'action sans exposer
+le contenu — ce n'est pas un identifiant alternatif, c'est un repli de rendu.
+
 ## Liens
 
 - Post-mortem associé : [2026-09-03-feed-report-urn-and-ui-actions](../post-mortem/2026-09-03-feed-report-urn-and-ui-actions.md)
 - Post-mortem antérieur sur ces mêmes chemins : [2026-08-06-repost-broken-api-and-ui](../post-mortem/2026-08-06-repost-broken-api-and-ui.md)
 - ADR upstream sur la dérive du rendu : [linkedin_scraper ADR-020](https://github.com/vinzlac/linkedin_scraper/blob/master/docs/adr/020-feed-dom-anchors-after-2026-09-rendering.md)
 - Commits : `3757bda` (cascade + diagnostic), `34aa13b` (scroll), `e12777d` (bump scraper 4.4.0)
+- Post-mortem du blocage navigateur : [2026-09-11-navigateur-hote-bloque](../post-mortem/2026-09-11-navigateur-hote-bloque.md)
 - Modules : `linkedin_mcp/linkedin/repost.py`, `post_page.py`, `feed_scroll.py`, `like_ui.py`, `repost_ui.py`
