@@ -164,11 +164,47 @@ def serialize_browser_access(*, wait_s: float, timeout_s: float = _BROWSER_OP_TI
             try:
                 return await asyncio.wait_for(func(*args, **kwargs), timeout=timeout_s)
             finally:
-                lock.release()
+                try:
+                    await _park_browser_page()
+                finally:
+                    lock.release()
 
         return wrapper
 
     return decorator
+
+
+# --- Garage de l'onglet entre deux outils ------------------------------------
+#
+# L'onglet partagé reste sinon sur la dernière page LinkedIn visitée (feed
+# déroulé, fils de commentaires, pages détail) : un renderer de plusieurs Go qui
+# ne redescend jamais entre deux appels. Le 2026-09-21, un scrape feed a poussé
+# le Chromium de l'hôte (chromium-cdp.service) à 3,26 G, au-dessus de son
+# MemoryHigh : étranglé deux heures par le noyau, il écoutait toujours sur son
+# port CDP sans répondre — deux runs de linkedin-sync perdus sur
+# `connect_over_cdp` (timeout 180 s) et ~1 000 fautes de page majeures/s sur le
+# nœud. about:blank rend le heap ; chaque scraper re-navigue de toute façon vers
+# sa page cible (garde sur `page.url`).
+_PARK_URL = "about:blank"
+_PARK_TIMEOUT_S = 10
+
+
+async def _park_browser_page() -> None:
+    """Gare l'onglet partagé sur about:blank. Best effort : jamais bloquant,
+    jamais une erreur — le résultat de l'outil et la libération du verrou
+    passent avant."""
+    if not _browser_initialized or _browser_manager is None:
+        return
+    try:
+        page = _browser_manager.page
+        if page.is_closed() or page.url == _PARK_URL:
+            return
+        await asyncio.wait_for(
+            page.goto(_PARK_URL, wait_until="commit"), timeout=_PARK_TIMEOUT_S
+        )
+        logger.debug("Onglet garé sur %s", _PARK_URL)
+    except Exception as exc:  # noqa: BLE001 - page crashée, navigateur parti…
+        logger.debug("Garage de l'onglet sans effet : %s", exc)
 
 
 
