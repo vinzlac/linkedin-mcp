@@ -222,9 +222,16 @@ async def _park_browser_page() -> None:
 _FEED_SESSION_IDLE_TTL_S = 600
 _FEED_SESSION_REAP_EVERY_S = 30
 _FEED_SESSION_CLOSE_TIMEOUT_S = 10
-# Le défilement d'un appel est borné à 3·count + 10 passes : au-delà de 50,
-# l'appel dépasserait _BROWSER_OP_TIMEOUT_S.
+# Le défilement d'un appel est borné à 3·count + 10 passes. À 50 posts, le pire
+# cas fait 160 défilements d'au moins 2,5 s, soit >= 400 s : au-dessus du délai
+# du décorateur (300 s) et du client du worker (180 s). 50 n'est qu'un plafond
+# de sécurité ; le worker demande 10 à 20 posts par appel.
 _FEED_SESSION_MAX_COUNT = 50
+# Plafond de posts par session : rien d'autre ne borne le DOM côté serveur, et ce
+# MCP est aussi exposé à d'autres clients. Sans lui, un client qui enchaîne les
+# next_feed_posts ferait grossir le renderer du Chromium partagé sans limite
+# (3,26 G le 2026-09-21). Atteint : session fermée, exhausted = true.
+_FEED_SESSION_MAX_POSTS = 300
 # Marque l'onglet d'une session : en contexte persistant CDP, il survit à un
 # redémarrage du pod et doit pouvoir être retrouvé (fuite d'onglets, af51454).
 _FEED_SESSION_TAB_MARKER = "linkedin-mcp-feed-session"
@@ -1328,6 +1335,16 @@ async def next_feed_posts(session_id: str, count: int = 10, ctx: Context = None)
                 raise RuntimeError(f"session de fil inconnue : {session_id} (onglet perdu : {e})") from e
             logger.exception("Erreur next_feed_posts")
             raise RuntimeError(f"Erreur lors de la lecture de la session de fil : {e}") from e
+        sess.posts_returned += len(posts)
+        if sess.posts_returned >= _FEED_SESSION_MAX_POSTS:
+            logger.warning(
+                "Session de fil %s : plafond de %d posts atteint — fermée",
+                session_id,
+                _FEED_SESSION_MAX_POSTS,
+            )
+            _feed_sessions.pop(session_id)
+            await _close_page_quietly(sess.page)
+            exhausted = True
         return json.dumps(
             {"posts": [p.to_public_dict() for p in posts], "exhausted": exhausted},
             ensure_ascii=False,

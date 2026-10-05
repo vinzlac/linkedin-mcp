@@ -21,8 +21,9 @@ Deux contraintes supplémentaires :
 4. **Expiration à 600 s d'inactivité.** Toute lecture repousse l'échéance ; une session abandonnée par un worker planté est récupérée et son onglet fermé.
 5. **Purge à la fermeture du singleton.** Fermer le navigateur purge toutes les sessions et ferme leurs onglets.
 6. **Premier plan rendu à l'onglet partagé** après chaque opération sur l'onglet dédié, afin qu'il ne soit jamais gelé en arrière-plan (af51454).
-7. **Marqueur `window.name` et balayage des orphelins.** L'onglet dédié est marqué via `window.name`. Au redémarrage du pod, un balayage ferme les onglets marqués sans session connue. Il est **restreint aux onglets `linkedin.com`** : on ne touche jamais aux onglets étrangers.
-8. **Aucune fuite d'onglet.** Annulation (`CancelledError`) et dépassements de délai ferment l'onglet dédié ; un échec du marquage ou un onglet planté ne laisse pas d'onglet ouvert.
+7. **Marqueur `window.name` et balayage des orphelins.** L'onglet dédié est marqué via `window.name`. Au prochain `begin_feed_session` (pas au redémarrage du pod lui-même), un balayage ferme les onglets marqués sans session connue. Il est **restreint aux onglets `linkedin.com`** : on ne touche jamais aux onglets étrangers.
+8. **Aucune fuite d'onglet.** Annulation (`CancelledError`) et dépassements de délai ferment l'onglet dédié ; un onglet planté est fermé avant l'erreur `session de fil inconnue`. Un échec du marquage, lui, laisse l'onglet ouvert et enregistré mais non marqué : il reste fermé par l'expiration ou `end_feed_session` tant que le pod vit, mais le balayage ne le retrouve pas après un redémarrage du pod.
+9. **Plafond de 300 posts par session.** Rien d'autre ne borne le DOM côté serveur (le MCP est aussi exposé à d'autres clients). Au plafond, la session est fermée et le lot est rendu avec `exhausted: true` ; un appel ultérieur sur cet identifiant reçoit `session de fil inconnue`.
 
 ## Conséquences
 

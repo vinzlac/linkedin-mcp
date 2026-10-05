@@ -452,6 +452,39 @@ def test_le_balayage_retrouve_un_orphelin_gele_sans_toucher_aux_onglets_etranger
         _uninstall()
 
 
+def test_le_plafond_de_posts_ferme_la_session_et_rend_exhausted():
+    manager, g, f = _install()
+    try:
+        with g, f, patch.object(server, "_FEED_SESSION_MAX_POSTS", 5):
+            sid = json.loads(_run(server.begin_feed_session()))["session_id"]
+            lot1 = json.loads(_run(server.next_feed_posts(session_id=sid, count=3)))
+            assert lot1["exhausted"] is False and len(lot1["posts"]) == 3
+            assert len(server._feed_sessions) == 1, "sous le plafond la session reste"
+            lot2 = json.loads(_run(server.next_feed_posts(session_id=sid, count=3)))
+            assert len(lot2["posts"]) == 3 and lot2["exhausted"] is True
+            assert len(server._feed_sessions) == 0
+            assert manager.context.pages[0].closed is True
+            try:
+                _run(server.next_feed_posts(session_id=sid, count=1))
+            except RuntimeError as exc:
+                assert "session de fil inconnue" in str(exc), str(exc)
+            else:
+                raise AssertionError("erreur attendue après le plafond")
+    finally:
+        _uninstall()
+
+
+def test_begin_marque_son_propre_onglet():
+    manager, g, f = _install()
+    try:
+        with g, f:
+            sid = json.loads(_run(server.begin_feed_session()))["session_id"]
+            _run(server.next_feed_posts(session_id=sid, count=1))
+        assert manager.context.pages[-1].window_name == server._FEED_SESSION_TAB_MARKER
+    finally:
+        _uninstall()
+
+
 if __name__ == "__main__":
     for nom, fn in list(globals().items()):
         if nom.startswith("test_") and callable(fn):

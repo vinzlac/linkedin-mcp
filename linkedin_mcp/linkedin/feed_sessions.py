@@ -26,6 +26,7 @@ class FeedSession:
     page: Any
     scraper: Any
     last_used: float
+    posts_returned: int = 0
 
 
 class FeedSessionRegistry:
