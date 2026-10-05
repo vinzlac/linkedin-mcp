@@ -228,6 +228,10 @@ _FEED_SESSION_MAX_COUNT = 50
 # Marque l'onglet d'une session : en contexte persistant CDP, il survit à un
 # redémarrage du pod et doit pouvoir être retrouvé (fuite d'onglets, af51454).
 _FEED_SESSION_TAB_MARKER = "linkedin-mcp-feed-session"
+# Marquage et sonde sont best effort : une borne courte, jamais le verrou tenu
+# sur un onglet figé.
+_FEED_SESSION_MARK_TIMEOUT_S = 5
+_FEED_SESSION_PROBE_TIMEOUT_S = 2
 
 _feed_sessions = FeedSessionRegistry(idle_ttl_s=_FEED_SESSION_IDLE_TTL_S)
 _feed_session_reaper: "asyncio.Task | None" = None
@@ -262,17 +266,37 @@ async def _refocus_shared_page() -> None:
 
 
 async def _close_orphan_feed_tabs(browser) -> None:
-    """Ferme les onglets de session laissés par un processus précédent."""
-    for page in list(browser.context.pages):
-        if page is browser.page:
-            continue
-        try:
-            nom = await asyncio.wait_for(page.evaluate("() => window.name"), timeout=2)
-        except Exception:  # noqa: BLE001 - onglet gelé ou mort : on ne le touche pas
-            continue
-        if nom == _FEED_SESSION_TAB_MARKER:
-            logger.warning("Onglet de session de fil orphelin retrouvé — fermé")
-            await _close_page_quietly(page)
+    """Ferme les onglets de session laissés par un processus précédent.
+
+    Un onglet d'arrière-plan est gelé par Chrome (af51454) : or l'orphelin d'un
+    pod redémarré est justement en arrière-plan. On le passe donc au premier
+    plan avant de lire son window.name. Le Chromium est partagé avec d'autres
+    applications : seuls les onglets linkedin.com sont candidats (page.url est
+    local, sans aller-retour), les autres ne sont jamais touchés."""
+    candidats = [
+        page
+        for page in list(browser.context.pages)
+        if page is not browser.page and "linkedin.com" in (page.url or "")
+    ]
+    if not candidats:
+        return
+    try:
+        for page in candidats:
+            try:
+                await asyncio.wait_for(page.bring_to_front(), timeout=_FEED_SESSION_PROBE_TIMEOUT_S)
+            except Exception as exc:  # noqa: BLE001 - la sonde dira si l'onglet répond
+                logger.debug("Premier plan sans effet sur un onglet candidat : %s", exc)
+            try:
+                nom = await asyncio.wait_for(
+                    page.evaluate("() => window.name"), timeout=_FEED_SESSION_PROBE_TIMEOUT_S
+                )
+            except Exception:  # noqa: BLE001 - onglet mort ou toujours figé : on le laisse
+                continue
+            if nom == _FEED_SESSION_TAB_MARKER:
+                logger.warning("Onglet de session de fil orphelin retrouvé — fermé")
+                await _close_page_quietly(page)
+    finally:
+        await _refocus_shared_page()
 
 
 async def _reap_feed_sessions_once() -> int:
@@ -1236,25 +1260,33 @@ async def begin_feed_session(ctx: Context = None) -> str:
         browser = await _get_browser()
         await _close_orphan_feed_tabs(browser)
         page = await browser.context.new_page()
-        scraper = FeedScraper(page)
+        registered = False
         try:
-            charge = await scraper.open_feed()
-        except _LINKEDIN_LIMIT_ERRORS as e:
-            await _close_page_quietly(page)
-            raise RuntimeError(f"limitation LinkedIn : {e}") from e
-        except Exception as e:
-            await _close_page_quietly(page)
-            logger.exception("Erreur begin_feed_session")
-            raise RuntimeError(f"Erreur lors de l'ouverture de la session de fil : {e}") from e
-        if not charge:
-            await _close_page_quietly(page)
-            raise RuntimeError("Erreur lors de l'ouverture de la session de fil : le fil ne s'est pas chargé")
-        try:
-            await page.evaluate(f"() => {{ window.name = '{_FEED_SESSION_TAB_MARKER}'; }}")
-        except Exception as exc:  # noqa: BLE001 - marqueur best effort
-            logger.debug("Marquage de l'onglet de session sans effet : %s", exc)
+            scraper = FeedScraper(page)
+            try:
+                charge = await scraper.open_feed()
+            except _LINKEDIN_LIMIT_ERRORS as e:
+                raise RuntimeError(f"limitation LinkedIn : {e}") from e
+            except Exception as e:
+                logger.exception("Erreur begin_feed_session")
+                raise RuntimeError(f"Erreur lors de l'ouverture de la session de fil : {e}") from e
+            if not charge:
+                raise RuntimeError("Erreur lors de l'ouverture de la session de fil : le fil ne s'est pas chargé")
+            try:
+                await asyncio.wait_for(
+                    page.evaluate(f"() => {{ window.name = '{_FEED_SESSION_TAB_MARKER}'; }}"),
+                    timeout=_FEED_SESSION_MARK_TIMEOUT_S,
+                )
+            except Exception as exc:  # noqa: BLE001 - marqueur best effort
+                logger.debug("Marquage de l'onglet de session sans effet : %s", exc)
 
-        sess, _ = _feed_sessions.open(page, scraper)
+            sess, _ = _feed_sessions.open(page, scraper)
+            registered = True
+        finally:
+            # Aussi sur annulation / délai du décorateur (CancelledError) : un
+            # onglet non enregistré est invisible du nettoyeur (R59).
+            if not registered:
+                await _close_page_quietly(page)
         _ensure_feed_session_reaper()
         logger.info("Session de fil %s ouverte", sess.session_id)
         return json.dumps({"session_id": sess.session_id})
@@ -1292,6 +1324,7 @@ async def next_feed_posts(session_id: str, count: int = 10, ctx: Context = None)
                 # Onglet fermé ou planté pendant l'appel : pour le client,
                 # c'est une session perdue, qu'il sait rouvrir (R60).
                 _feed_sessions.pop(session_id)
+                await _close_page_quietly(sess.page)
                 raise RuntimeError(f"session de fil inconnue : {session_id} (onglet perdu : {e})") from e
             logger.exception("Erreur next_feed_posts")
             raise RuntimeError(f"Erreur lors de la lecture de la session de fil : {e}") from e

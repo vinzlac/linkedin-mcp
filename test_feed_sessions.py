@@ -344,6 +344,114 @@ def test_le_nettoyeur_ferme_une_session_expiree():
         _uninstall()
 
 
+class FrozenPage(FakePage):
+    """Onglet d'arrière-plan gelé : evaluate ne répond qu'après bring_to_front."""
+
+    def __init__(self, url, window_name=""):
+        super().__init__(url=url, window_name=window_name)
+        self.evaluations = 0
+
+    async def evaluate(self, script):
+        self.evaluations += 1
+        if self.fronts == 0:
+            await asyncio.Event().wait()
+        return self.window_name
+
+
+class ForeignPage(FakePage):
+    async def evaluate(self, script):
+        self.evaluations = getattr(self, "evaluations", 0) + 1
+        return self.window_name
+
+
+def test_begin_annule_ferme_l_onglet_dedie():
+    manager, g, f = _install()
+
+    async def hang(self):
+        await asyncio.Event().wait()
+
+    try:
+        with g, patch.object(server, "FeedScraper", FakeFeedScraper), patch.object(
+            FakeFeedScraper, "open_feed", hang
+        ):
+
+            async def scenario():
+                task = asyncio.ensure_future(server.begin_feed_session())
+                await asyncio.sleep(0.05)
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+
+            _run(scenario())
+        assert len(manager.context.pages) == 1
+        assert manager.context.pages[0].closed is True
+        assert len(server._feed_sessions) == 0
+    finally:
+        _uninstall()
+
+
+def test_begin_ne_fuit_pas_si_le_marquage_se_fige():
+    manager, g, f = _install()
+    try:
+        with g, f, patch.object(server, "_FEED_SESSION_MARK_TIMEOUT_S", 0.05):
+
+            async def hang_mark(self, script):
+                if "window.name =" in script:
+                    await asyncio.Event().wait()
+                return self.window_name
+
+            with patch.object(FakePage, "evaluate", hang_mark):
+                sid = json.loads(_run(server.begin_feed_session()))["session_id"]
+        assert manager.context.pages[0].closed is False
+        assert server._feed_sessions.get(sid) is not None
+    finally:
+        _uninstall()
+
+
+def test_next_ferme_un_onglet_plante_non_ferme():
+    manager, g, f = _install()
+    try:
+        with g, f:
+            sid = json.loads(_run(server.begin_feed_session()))["session_id"]
+            sess = server._feed_sessions.get(sid)
+
+            async def crash(limit=10):
+                raise RuntimeError("Page.evaluate: Page crashed")
+
+            sess.scraper.scrape_next = crash
+            assert sess.page.closed is False
+            try:
+                _run(server.next_feed_posts(session_id=sid, count=1))
+            except RuntimeError as exc:
+                assert "session de fil inconnue" in str(exc), str(exc)
+            else:
+                raise AssertionError("erreur attendue")
+        assert sess.page.closed is True
+        assert len(server._feed_sessions) == 0
+    finally:
+        _uninstall()
+
+
+def test_le_balayage_retrouve_un_orphelin_gele_sans_toucher_aux_onglets_etrangers():
+    manager, g, f = _install()
+    orphelin = FrozenPage("https://www.linkedin.com/feed/", server._FEED_SESSION_TAB_MARKER)
+    linkedin_normal = FrozenPage("https://www.linkedin.com/in/someone/")
+    etranger = ForeignPage(url="https://example.org/")
+    manager.context.pages.extend([orphelin, linkedin_normal, etranger])
+    try:
+        with g, f, patch.object(server, "_FEED_SESSION_PROBE_TIMEOUT_S", 0.2):
+            _run(server.begin_feed_session())
+        assert orphelin.closed is True
+        assert linkedin_normal.closed is False
+        assert etranger.closed is False
+        assert etranger.fronts == 0 and getattr(etranger, "evaluations", 0) == 0
+        assert manager.page.fronts >= 1, "premier plan rendu à l'onglet partagé"
+    finally:
+        _uninstall()
+
+
 if __name__ == "__main__":
     for nom, fn in list(globals().items()):
         if nom.startswith("test_") and callable(fn):
