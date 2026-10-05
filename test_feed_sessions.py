@@ -4,6 +4,7 @@ Lancer : uv run python test_feed_sessions.py
 """
 import asyncio
 import json
+import logging
 import os
 import sys
 from unittest.mock import patch
@@ -23,6 +24,11 @@ class FakePage:
         self.gotos = []
         self.fronts = 0
         self.window_name = window_name
+        self.handlers = {}
+        self.main_frame = object()
+
+    def on(self, event, handler):
+        self.handlers.setdefault(event, []).append(handler)
 
     def is_closed(self):
         return self.closed
@@ -482,6 +488,103 @@ def test_begin_marque_son_propre_onglet():
             _run(server.next_feed_posts(session_id=sid, count=1))
         assert manager.context.pages[-1].window_name == server._FEED_SESSION_TAB_MARKER
     finally:
+        _uninstall()
+
+
+class _Capture(logging.Handler):
+    def __init__(self):
+        super().__init__(level=logging.DEBUG)
+        self.records = []
+
+    def emit(self, record):
+        self.records.append((record.levelno, record.getMessage()))
+
+
+def _capture():
+    cap = _Capture()
+    server.logger.addHandler(cap)
+    old = server.logger.level
+    server.logger.setLevel(logging.DEBUG)
+    return cap, lambda: (server.logger.removeHandler(cap), server.logger.setLevel(old))
+
+
+def test_la_navigation_de_l_onglet_de_session_est_journalisee():
+    manager, g, f = _install()
+    cap, undo = _capture()
+    try:
+        with g, f:
+            _run(server.begin_feed_session())
+        page = manager.context.pages[0]
+        assert len(page.handlers.get("framenavigated", [])) == 1
+        handler = page.handlers["framenavigated"][0]
+        cap.records.clear()
+
+        class Frame:
+            url = "https://www.linkedin.com/checkpoint/challenge/abc"
+
+        frame = Frame()
+        page.main_frame = frame
+        handler(frame)
+        assert any(
+            lvl == logging.INFO and frame.url in msg for lvl, msg in cap.records
+        ), cap.records
+        cap.records.clear()
+        handler(Frame())  # autre frame que le principal
+        assert cap.records == []
+        handler(object())  # objet cassé : ne lève jamais
+        handler(None)
+    finally:
+        undo()
+        _uninstall()
+
+
+def test_next_perdu_donne_l_url_dans_le_message():
+    manager, g, f = _install()
+    cap, undo = _capture()
+    try:
+        with g, f:
+            sid = json.loads(_run(server.begin_feed_session()))["session_id"]
+            sess = server._feed_sessions.get(sid)
+            sess.page.url = "https://www.linkedin.com/checkpoint/x"
+
+            async def detruit(limit=10):
+                raise RuntimeError("Page.evaluate: Execution context was destroyed, most likely because of a navigation")
+
+            sess.scraper.scrape_next = detruit
+            try:
+                _run(server.next_feed_posts(session_id=sid, count=1))
+            except RuntimeError as exc:
+                assert "session de fil inconnue" in str(exc), str(exc)
+                assert "url=https://www.linkedin.com/checkpoint/x" in str(exc), str(exc)
+            else:
+                raise AssertionError("erreur attendue")
+        assert any(
+            lvl == logging.WARNING and "url=https://www.linkedin.com/checkpoint/x" in msg
+            for lvl, msg in cap.records
+        ), cap.records
+    finally:
+        undo()
+        _uninstall()
+
+
+def test_next_reussi_journalise_url_posts_et_exhausted():
+    manager, g, f = _install()
+    cap, undo = _capture()
+    try:
+        with g, f:
+            sid = json.loads(_run(server.begin_feed_session()))["session_id"]
+            manager.context.pages[0].url = "https://www.linkedin.com/feed/"
+            _run(server.next_feed_posts(session_id=sid, count=2))
+        assert any(
+            lvl == logging.INFO
+            and "url=https://www.linkedin.com/feed/" in msg
+            and "2 posts" in msg
+            and "exhausted=False" in msg
+            and "total=2" in msg
+            for lvl, msg in cap.records
+        ), cap.records
+    finally:
+        undo()
         _uninstall()
 
 

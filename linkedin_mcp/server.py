@@ -246,6 +246,39 @@ _feed_session_reaper: "asyncio.Task | None" = None
 _LINKEDIN_LIMIT_ERRORS = (RateLimitError, CheckpointError, CooldownActiveError)
 
 
+def _page_url(page) -> str:
+    """URL courante d'un onglet, sans jamais lever (onglet fermé ou planté)."""
+    try:
+        return str(page.url)
+    except Exception:  # noqa: BLE001
+        return "?"
+
+
+def _log_feed_tab_navigation(page, session_tag: list) -> None:
+    """Journalise les navigations du cadre principal de l'onglet de session.
+
+    Diagnostic 2026-10-05 : un premier next_feed_posts a échoué avec « Execution
+    context was destroyed » — l'onglet avait navigué entre begin et next, sans
+    trace de l'URL. `session_tag` est rempli avec l'identifiant une fois connu."""
+    if not hasattr(page, "on"):
+        return
+
+    def handler(frame) -> None:
+        try:
+            if frame is not page.main_frame:
+                return
+            logger.info(
+                "Session de fil %s: navigation de l'onglet vers %s", session_tag[0], frame.url
+            )
+        except Exception:  # noqa: BLE001 - un diagnostic ne doit jamais casser Playwright
+            pass
+
+    try:
+        page.on("framenavigated", handler)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Journal de navigation indisponible : %s", exc)
+
+
 async def _close_page_quietly(page) -> None:
     """Ferme un onglet. Best effort : jamais une erreur."""
     try:
@@ -1268,7 +1301,9 @@ async def begin_feed_session(ctx: Context = None) -> str:
         await _close_orphan_feed_tabs(browser)
         page = await browser.context.new_page()
         registered = False
+        session_tag = ["…"]
         try:
+            _log_feed_tab_navigation(page, session_tag)
             scraper = FeedScraper(page)
             try:
                 charge = await scraper.open_feed()
@@ -1289,13 +1324,14 @@ async def begin_feed_session(ctx: Context = None) -> str:
 
             sess, _ = _feed_sessions.open(page, scraper)
             registered = True
+            session_tag[0] = sess.session_id
         finally:
             # Aussi sur annulation / délai du décorateur (CancelledError) : un
             # onglet non enregistré est invisible du nettoyeur (R59).
             if not registered:
                 await _close_page_quietly(page)
         _ensure_feed_session_reaper()
-        logger.info("Session de fil %s ouverte", sess.session_id)
+        logger.info("Session de fil %s ouverte, url=%s", sess.session_id, _page_url(page))
         return json.dumps({"session_id": sess.session_id})
     finally:
         await _refocus_shared_page()
@@ -1322,20 +1358,34 @@ async def next_feed_posts(session_id: str, count: int = 10, ctx: Context = None)
         except UnknownFeedSessionError as e:
             raise RuntimeError(str(e)) from e
         count = max(1, min(count, _FEED_SESSION_MAX_COUNT))
+        logger.info(
+            "Session de fil %s : lecture de %d posts, url=%s", session_id, count, _page_url(sess.page)
+        )
         try:
             posts, exhausted = await sess.scraper.scrape_next(limit=count)
         except _LINKEDIN_LIMIT_ERRORS as e:
+            logger.warning("Session de fil %s : limitation, url=%s : %s", session_id, _page_url(sess.page), e)
             raise RuntimeError(f"limitation LinkedIn : {e}") from e
         except Exception as e:
+            url = _page_url(sess.page)
+            logger.warning("Session de fil %s : échec de lecture, url=%s : %s", session_id, url, e)
             if sess.page.is_closed() or is_recoverable_browser_error(e):
                 # Onglet fermé ou planté pendant l'appel : pour le client,
                 # c'est une session perdue, qu'il sait rouvrir (R60).
                 _feed_sessions.pop(session_id)
                 await _close_page_quietly(sess.page)
-                raise RuntimeError(f"session de fil inconnue : {session_id} (onglet perdu : {e})") from e
+                raise RuntimeError(f"session de fil inconnue : {session_id} (onglet perdu : {e} ; url={url})") from e
             logger.exception("Erreur next_feed_posts")
             raise RuntimeError(f"Erreur lors de la lecture de la session de fil : {e}") from e
         sess.posts_returned += len(posts)
+        logger.info(
+            "Session de fil %s : url=%s , %d posts, exhausted=%s, total=%d",
+            session_id,
+            _page_url(sess.page),
+            len(posts),
+            exhausted,
+            sess.posts_returned,
+        )
         if sess.posts_returned >= _FEED_SESSION_MAX_POSTS:
             logger.warning(
                 "Session de fil %s : plafond de %d posts atteint — fermée",
