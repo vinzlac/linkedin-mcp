@@ -82,6 +82,7 @@ class FakeFeedScraper:
 
     load_ok = True
     open_error = None
+    after_open = None
 
     def __init__(self, page):
         self.page = page
@@ -91,6 +92,10 @@ class FakeFeedScraper:
     async def open_feed(self):
         if FakeFeedScraper.open_error:
             raise FakeFeedScraper.open_error
+        if FakeFeedScraper.load_ok:
+            self.page.url = "https://www.linkedin.com/feed/"
+        if FakeFeedScraper.after_open:
+            await FakeFeedScraper.after_open(self.page)
         return FakeFeedScraper.load_ok
 
     async def scrape_next(self, limit=10):
@@ -107,6 +112,10 @@ def _install():
     server._feed_sessions.pop_all()
     FakeFeedScraper.load_ok = True
     FakeFeedScraper.open_error = None
+    FakeFeedScraper.after_open = None
+    server._FEED_SESSION_SETTLE_QUIET_S = 0.05
+    server._FEED_SESSION_SETTLE_TIMEOUT_S = 0.5
+    server._FEED_SESSION_SETTLE_POLL_S = 0.01
 
     async def fake_get_browser():
         return manager
@@ -585,6 +594,68 @@ def test_next_reussi_journalise_url_posts_et_exhausted():
         ), cap.records
     finally:
         undo()
+        _uninstall()
+
+
+def _naviguer(page, url):
+    """Simule une navigation du cadre principal, comme Playwright."""
+
+    class Frame:
+        pass
+
+    frame = Frame()
+    frame.url = url
+    page.main_frame = frame
+    page.url = url
+    for handler in page.handlers.get("framenavigated", []):
+        handler(frame)
+
+
+def test_begin_attend_la_fin_des_redirections_de_l_onglet():
+    # Essai réel du 2026-10-05 : /feed -> /uas/login -> /login -> /feed avant
+    # que la page soit utilisable. Un begin qui rend la main pendant ce rebond
+    # laisse le premier next tomber sur « Execution context was destroyed ».
+    manager, g, f = _install()
+    try:
+        etapes = []
+
+        async def rebond(page):
+            _naviguer(page, "https://www.linkedin.com/login/?session_redirect=x")
+
+            async def retour():
+                await asyncio.sleep(0.15)
+                _naviguer(page, "https://www.linkedin.com/feed/")
+                etapes.append("retour sur le fil")
+
+            asyncio.get_running_loop().create_task(retour())
+
+        FakeFeedScraper.after_open = rebond
+        with g, f:
+            sid = json.loads(_run(server.begin_feed_session()))["session_id"]
+        assert etapes == ["retour sur le fil"], "begin a rendu la main pendant le rebond"
+        assert server._feed_sessions.get(sid).page.url == "https://www.linkedin.com/feed/"
+    finally:
+        _uninstall()
+
+
+def test_begin_echoue_si_l_onglet_ne_revient_pas_sur_le_fil():
+    manager, g, f = _install()
+    try:
+
+        async def bloque(page):
+            _naviguer(page, "https://www.linkedin.com/checkpoint/challenge/abc")
+
+        FakeFeedScraper.after_open = bloque
+        with g, f:
+            try:
+                _run(server.begin_feed_session())
+            except RuntimeError as exc:
+                assert "/checkpoint/challenge/abc" in str(exc), str(exc)
+            else:
+                raise AssertionError("erreur attendue")
+        assert manager.context.pages[0].closed is True
+        assert len(server._feed_sessions) == 0
+    finally:
         _uninstall()
 
 

@@ -4,6 +4,7 @@ import functools
 import json
 import logging
 import os
+import time
 import webbrowser
 from pathlib import Path
 from typing import List
@@ -239,6 +240,12 @@ _FEED_SESSION_TAB_MARKER = "linkedin-mcp-feed-session"
 # sur un onglet figé.
 _FEED_SESSION_MARK_TIMEOUT_S = 5
 _FEED_SESSION_PROBE_TIMEOUT_S = 2
+# À l'ouverture, LinkedIn fait rebondir l'onglet par /uas/login puis /login
+# avant de revenir sur le fil (essai réel du 2026-10-05). begin ne rend la main
+# qu'une fois l'onglet sur le fil et sans navigation depuis QUIET secondes.
+_FEED_SESSION_SETTLE_QUIET_S = 2.0
+_FEED_SESSION_SETTLE_TIMEOUT_S = 15.0
+_FEED_SESSION_SETTLE_POLL_S = 0.25
 
 _feed_sessions = FeedSessionRegistry(idle_ttl_s=_FEED_SESSION_IDLE_TTL_S)
 _feed_session_reaper: "asyncio.Task | None" = None
@@ -254,12 +261,13 @@ def _page_url(page) -> str:
         return "?"
 
 
-def _log_feed_tab_navigation(page, session_tag: list) -> None:
+def _log_feed_tab_navigation(page, session_tag: list, last_nav: list) -> None:
     """Journalise les navigations du cadre principal de l'onglet de session.
 
     Diagnostic 2026-10-05 : un premier next_feed_posts a échoué avec « Execution
     context was destroyed » — l'onglet avait navigué entre begin et next, sans
-    trace de l'URL. `session_tag` est rempli avec l'identifiant une fois connu."""
+    trace de l'URL. `session_tag` est rempli avec l'identifiant une fois connu ;
+    `last_nav[0]` reçoit l'instant (monotone) de la dernière navigation."""
     if not hasattr(page, "on"):
         return
 
@@ -267,6 +275,7 @@ def _log_feed_tab_navigation(page, session_tag: list) -> None:
         try:
             if frame is not page.main_frame:
                 return
+            last_nav[0] = time.monotonic()
             logger.info(
                 "Session de fil %s: navigation de l'onglet vers %s", session_tag[0], frame.url
             )
@@ -277,6 +286,24 @@ def _log_feed_tab_navigation(page, session_tag: list) -> None:
         page.on("framenavigated", handler)
     except Exception as exc:  # noqa: BLE001
         logger.debug("Journal de navigation indisponible : %s", exc)
+
+
+async def _wait_for_feed_tab_settled(page, last_nav: list) -> None:
+    """Attend que l'onglet soit sur le fil et n'ait plus navigué depuis
+    `_FEED_SESSION_SETTLE_QUIET_S` ; lève RuntimeError (avec l'URL) au-delà de
+    `_FEED_SESSION_SETTLE_TIMEOUT_S`."""
+    deadline = time.monotonic() + _FEED_SESSION_SETTLE_TIMEOUT_S
+    while True:
+        now = time.monotonic()
+        on_feed = "linkedin.com/feed" in _page_url(page)
+        if on_feed and now - last_nav[0] >= _FEED_SESSION_SETTLE_QUIET_S:
+            return
+        if now >= deadline:
+            raise RuntimeError(
+                "Erreur lors de l'ouverture de la session de fil : l'onglet ne s'est pas "
+                f"stabilisé sur le fil, url={_page_url(page)}"
+            )
+        await asyncio.sleep(_FEED_SESSION_SETTLE_POLL_S)
 
 
 async def _close_page_quietly(page) -> None:
@@ -1302,8 +1329,9 @@ async def begin_feed_session(ctx: Context = None) -> str:
         page = await browser.context.new_page()
         registered = False
         session_tag = ["…"]
+        last_nav = [time.monotonic()]
         try:
-            _log_feed_tab_navigation(page, session_tag)
+            _log_feed_tab_navigation(page, session_tag, last_nav)
             scraper = FeedScraper(page)
             try:
                 charge = await scraper.open_feed()
@@ -1314,6 +1342,7 @@ async def begin_feed_session(ctx: Context = None) -> str:
                 raise RuntimeError(f"Erreur lors de l'ouverture de la session de fil : {e}") from e
             if not charge:
                 raise RuntimeError("Erreur lors de l'ouverture de la session de fil : le fil ne s'est pas chargé")
+            await _wait_for_feed_tab_settled(page, last_nav)
             try:
                 await asyncio.wait_for(
                     page.evaluate(f"() => {{ window.name = '{_FEED_SESSION_TAB_MARKER}'; }}"),
