@@ -4,6 +4,7 @@ import functools
 import json
 import logging
 import os
+import time
 import webbrowser
 from pathlib import Path
 from typing import List
@@ -35,11 +36,16 @@ from .config.settings import settings
 from linkedin_scraper import (
     AuthenticationError,
     BrowserManager,
+    CheckpointError,
     FeedScraper,
     InvitationScraper,
     MessagingScraper,
+    RateLimitError,
     wait_for_manual_login,
 )
+from linkedin_scraper.core.rate_limit_guard import CooldownActiveError
+
+from .linkedin.feed_sessions import FeedSessionRegistry, UnknownFeedSessionError
 
 # Configure logging
 configure_logging(
@@ -208,9 +214,189 @@ async def _park_browser_page() -> None:
 
 
 
+# --- Sessions de fil (spec lots de scraping, R55-R61) ------------------------
+#
+# Une session possède son PROPRE onglet, jamais garé sur about:blank : c'est ce
+# qui lui permet de reprendre le fil là où elle l'a laissé. Elle coûte de la
+# mémoire au Chromium hôte (le renderer a dépassé 3,26 G le 2026-09-21) : une
+# seule à la fois, et fermeture automatique après inactivité.
+_FEED_SESSION_IDLE_TTL_S = 600
+_FEED_SESSION_REAP_EVERY_S = 30
+_FEED_SESSION_CLOSE_TIMEOUT_S = 10
+# Le défilement d'un appel est borné à 3·count + 10 passes. À 50 posts, le pire
+# cas fait 160 défilements d'au moins 2,5 s, soit >= 400 s : au-dessus du délai
+# du décorateur (300 s) et du client du worker (180 s). 50 n'est qu'un plafond
+# de sécurité ; le worker demande 10 à 20 posts par appel.
+_FEED_SESSION_MAX_COUNT = 50
+# Plafond de posts par session : rien d'autre ne borne le DOM côté serveur, et ce
+# MCP est aussi exposé à d'autres clients. Sans lui, un client qui enchaîne les
+# next_feed_posts ferait grossir le renderer du Chromium partagé sans limite
+# (3,26 G le 2026-09-21). Atteint : session fermée, exhausted = true.
+_FEED_SESSION_MAX_POSTS = 300
+# Marque l'onglet d'une session : en contexte persistant CDP, il survit à un
+# redémarrage du pod et doit pouvoir être retrouvé (fuite d'onglets, af51454).
+_FEED_SESSION_TAB_MARKER = "linkedin-mcp-feed-session"
+# Marquage et sonde sont best effort : une borne courte, jamais le verrou tenu
+# sur un onglet figé.
+_FEED_SESSION_MARK_TIMEOUT_S = 5
+_FEED_SESSION_PROBE_TIMEOUT_S = 2
+# À l'ouverture, LinkedIn fait rebondir l'onglet par /uas/login puis /login
+# avant de revenir sur le fil (essai réel du 2026-10-05). begin ne rend la main
+# qu'une fois l'onglet sur le fil et sans navigation depuis QUIET secondes.
+_FEED_SESSION_SETTLE_QUIET_S = 2.0
+_FEED_SESSION_SETTLE_TIMEOUT_S = 15.0
+_FEED_SESSION_SETTLE_POLL_S = 0.25
+
+_feed_sessions = FeedSessionRegistry(idle_ttl_s=_FEED_SESSION_IDLE_TTL_S)
+_feed_session_reaper: "asyncio.Task | None" = None
+
+_LINKEDIN_LIMIT_ERRORS = (RateLimitError, CheckpointError, CooldownActiveError)
+
+
+def _page_url(page) -> str:
+    """URL courante d'un onglet, sans jamais lever (onglet fermé ou planté)."""
+    try:
+        return str(page.url)
+    except Exception:  # noqa: BLE001
+        return "?"
+
+
+def _log_feed_tab_navigation(page, session_tag: list, last_nav: list) -> None:
+    """Journalise les navigations du cadre principal de l'onglet de session.
+
+    Diagnostic 2026-10-05 : un premier next_feed_posts a échoué avec « Execution
+    context was destroyed » — l'onglet avait navigué entre begin et next, sans
+    trace de l'URL. `session_tag` est rempli avec l'identifiant une fois connu ;
+    `last_nav[0]` reçoit l'instant (monotone) de la dernière navigation."""
+    if not hasattr(page, "on"):
+        return
+
+    def handler(frame) -> None:
+        try:
+            if frame is not page.main_frame:
+                return
+            last_nav[0] = time.monotonic()
+            logger.info(
+                "Session de fil %s: navigation de l'onglet vers %s", session_tag[0], frame.url
+            )
+        except Exception:  # noqa: BLE001 - un diagnostic ne doit jamais casser Playwright
+            pass
+
+    try:
+        page.on("framenavigated", handler)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Journal de navigation indisponible : %s", exc)
+
+
+async def _wait_for_feed_tab_settled(page, last_nav: list) -> None:
+    """Attend que l'onglet soit sur le fil et n'ait plus navigué depuis
+    `_FEED_SESSION_SETTLE_QUIET_S` ; lève RuntimeError (avec l'URL) au-delà de
+    `_FEED_SESSION_SETTLE_TIMEOUT_S`."""
+    deadline = time.monotonic() + _FEED_SESSION_SETTLE_TIMEOUT_S
+    while True:
+        now = time.monotonic()
+        on_feed = "linkedin.com/feed" in _page_url(page)
+        if on_feed and now - last_nav[0] >= _FEED_SESSION_SETTLE_QUIET_S:
+            return
+        if now >= deadline:
+            raise RuntimeError(
+                "Erreur lors de l'ouverture de la session de fil : l'onglet ne s'est pas "
+                f"stabilisé sur le fil, url={_page_url(page)}"
+            )
+        await asyncio.sleep(_FEED_SESSION_SETTLE_POLL_S)
+
+
+async def _close_page_quietly(page) -> None:
+    """Ferme un onglet. Best effort : jamais une erreur."""
+    try:
+        await asyncio.wait_for(page.close(), timeout=_FEED_SESSION_CLOSE_TIMEOUT_S)
+    except Exception as exc:  # noqa: BLE001 - onglet déjà parti, navigateur mort…
+        logger.debug("Fermeture d'onglet sans effet : %s", exc)
+
+
+async def _close_feed_session_page(sess) -> None:
+    await _close_page_quietly(sess.page)
+
+
+async def _refocus_shared_page() -> None:
+    """Rend le premier plan à l'onglet partagé après un outil de session.
+
+    Gelé en arrière-plan (af51454), il ferait expirer la sonde evaluate("1")
+    de _browser_singleton_is_alive au prochain appel d'un autre outil :
+    navigateur jugé mort, relancé, session de fil perdue."""
+    if not _browser_initialized or _browser_manager is None:
+        return
+    try:
+        await asyncio.wait_for(_browser_manager.page.bring_to_front(), timeout=_PARK_TIMEOUT_S)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Remise au premier plan sans effet : %s", exc)
+
+
+async def _close_orphan_feed_tabs(browser) -> None:
+    """Ferme les onglets de session laissés par un processus précédent.
+
+    Un onglet d'arrière-plan est gelé par Chrome (af51454) : or l'orphelin d'un
+    pod redémarré est justement en arrière-plan. On le passe donc au premier
+    plan avant de lire son window.name. Le Chromium est partagé avec d'autres
+    applications : seuls les onglets linkedin.com sont candidats (page.url est
+    local, sans aller-retour), les autres ne sont jamais touchés."""
+    candidats = [
+        page
+        for page in list(browser.context.pages)
+        if page is not browser.page and "linkedin.com" in (page.url or "")
+    ]
+    if not candidats:
+        return
+    try:
+        for page in candidats:
+            try:
+                await asyncio.wait_for(page.bring_to_front(), timeout=_FEED_SESSION_PROBE_TIMEOUT_S)
+            except Exception as exc:  # noqa: BLE001 - la sonde dira si l'onglet répond
+                logger.debug("Premier plan sans effet sur un onglet candidat : %s", exc)
+            try:
+                nom = await asyncio.wait_for(
+                    page.evaluate("() => window.name"), timeout=_FEED_SESSION_PROBE_TIMEOUT_S
+                )
+            except Exception:  # noqa: BLE001 - onglet mort ou toujours figé : on le laisse
+                continue
+            if nom == _FEED_SESSION_TAB_MARKER:
+                logger.warning("Onglet de session de fil orphelin retrouvé — fermé")
+                await _close_page_quietly(page)
+    finally:
+        await _refocus_shared_page()
+
+
+async def _reap_feed_sessions_once() -> int:
+    """Ferme les sessions inactives depuis plus de _FEED_SESSION_IDLE_TTL_S."""
+    expirees = _feed_sessions.pop_expired()
+    for sess in expirees:
+        logger.warning("Session de fil %s expirée après inactivité — onglet fermé", sess.session_id)
+        await _close_feed_session_page(sess)
+    return len(expirees)
+
+
+async def _feed_session_reaper_loop() -> None:
+    while len(_feed_sessions) > 0:
+        await asyncio.sleep(_FEED_SESSION_REAP_EVERY_S)
+        await _reap_feed_sessions_once()
+
+
+def _ensure_feed_session_reaper() -> None:
+    """Un worker qui plante ne ferme jamais sa session : sans ce nettoyeur,
+    l'onglet resterait ouvert jusqu'au prochain run, le lendemain (R59)."""
+    global _feed_session_reaper
+    if _feed_session_reaper is None or _feed_session_reaper.done():
+        _feed_session_reaper = asyncio.get_running_loop().create_task(_feed_session_reaper_loop())
+
+
 async def _close_browser_singleton() -> None:
     """Ferme le navigateur Playwright réutilisé par scrape_feed (ex. après nouvelle session)."""
     global _browser_manager, _browser_initialized
+    # Les onglets de session appartiennent au navigateur qu'on ferme : leurs
+    # identifiants deviennent invalides, et le prochain appel doit le dire
+    # (« session de fil inconnue ») plutôt que piloter une page morte.
+    for sess in _feed_sessions.pop_all():
+        await _close_feed_session_page(sess)
     if _browser_manager is not None:
         try:
             await _browser_manager.close()
@@ -1115,6 +1301,158 @@ async def scrape_feed(count: int = 10, ctx: Context = None) -> str:
         if ctx:
             await ctx.error(error_msg)
         raise RuntimeError(error_msg)
+
+
+@mcp.tool()
+@track_tool_calls
+@serialize_browser_access(wait_s=_LOCK_WAIT_WORK_S)
+async def begin_feed_session(ctx: Context = None) -> str:
+    """Ouvre une session de fil : un onglet dédié, chargé sur le fil LinkedIn.
+
+    La session garde sa position entre deux appels de `next_feed_posts` : on lit
+    le fil par lots, comme un humain qui fait défiler, sans le recharger. Une
+    seule session à la fois (la précédente est fermée) ; fermeture automatique
+    après 10 minutes sans appel. Fermer avec `end_feed_session`.
+
+    Returns:
+        JSON `{"session_id": "..."}`.
+    """
+    try:
+        await _reap_feed_sessions_once()
+        # R58 — fermer l'ancienne session AVANT d'en charger une nouvelle : deux
+        # fils chargés coexisteraient dans le Chromium hôte (3,26 G le 2026-09-21).
+        for ancienne in _feed_sessions.pop_all():
+            logger.warning("Session de fil %s remplacée — onglet fermé", ancienne.session_id)
+            await _close_feed_session_page(ancienne)
+        browser = await _get_browser()
+        await _close_orphan_feed_tabs(browser)
+        page = await browser.context.new_page()
+        registered = False
+        session_tag = ["…"]
+        last_nav = [time.monotonic()]
+        try:
+            _log_feed_tab_navigation(page, session_tag, last_nav)
+            scraper = FeedScraper(page)
+            try:
+                charge = await scraper.open_feed()
+            except _LINKEDIN_LIMIT_ERRORS as e:
+                raise RuntimeError(f"limitation LinkedIn : {e}") from e
+            except Exception as e:
+                logger.exception("Erreur begin_feed_session")
+                raise RuntimeError(f"Erreur lors de l'ouverture de la session de fil : {e}") from e
+            if not charge:
+                raise RuntimeError("Erreur lors de l'ouverture de la session de fil : le fil ne s'est pas chargé")
+            await _wait_for_feed_tab_settled(page, last_nav)
+            try:
+                await asyncio.wait_for(
+                    page.evaluate(f"() => {{ window.name = '{_FEED_SESSION_TAB_MARKER}'; }}"),
+                    timeout=_FEED_SESSION_MARK_TIMEOUT_S,
+                )
+            except Exception as exc:  # noqa: BLE001 - marqueur best effort
+                logger.debug("Marquage de l'onglet de session sans effet : %s", exc)
+
+            sess, _ = _feed_sessions.open(page, scraper)
+            registered = True
+            session_tag[0] = sess.session_id
+        finally:
+            # Aussi sur annulation / délai du décorateur (CancelledError) : un
+            # onglet non enregistré est invisible du nettoyeur (R59).
+            if not registered:
+                await _close_page_quietly(page)
+        _ensure_feed_session_reaper()
+        logger.info("Session de fil %s ouverte, url=%s", sess.session_id, _page_url(page))
+        return json.dumps({"session_id": sess.session_id})
+    finally:
+        await _refocus_shared_page()
+
+
+@mcp.tool()
+@track_tool_calls
+@serialize_browser_access(wait_s=_LOCK_WAIT_WORK_S)
+async def next_feed_posts(session_id: str, count: int = 10, ctx: Context = None) -> str:
+    """Rend les `count` posts suivants d'une session de fil, sans recharger.
+
+    Le fil défile depuis la position laissée par l'appel précédent ; un post
+    déjà rendu dans cette session ne l'est jamais une seconde fois. `count`
+    est borné entre 1 et 50.
+
+    Returns:
+        JSON `{"posts": [...], "exhausted": bool}` — chaque post a le format de
+        `scrape_feed` ; `exhausted` vaut vrai quand le défilement n'a plus rien
+        apporté.
+    """
+    try:
+        try:
+            sess = _feed_sessions.get(session_id)
+        except UnknownFeedSessionError as e:
+            raise RuntimeError(str(e)) from e
+        count = max(1, min(count, _FEED_SESSION_MAX_COUNT))
+        logger.info(
+            "Session de fil %s : lecture de %d posts, url=%s", session_id, count, _page_url(sess.page)
+        )
+        try:
+            posts, exhausted = await sess.scraper.scrape_next(limit=count)
+        except _LINKEDIN_LIMIT_ERRORS as e:
+            logger.warning("Session de fil %s : limitation, url=%s : %s", session_id, _page_url(sess.page), e)
+            raise RuntimeError(f"limitation LinkedIn : {e}") from e
+        except Exception as e:
+            url = _page_url(sess.page)
+            logger.warning("Session de fil %s : échec de lecture, url=%s : %s", session_id, url, e)
+            if sess.page.is_closed() or is_recoverable_browser_error(e):
+                # Onglet fermé ou planté pendant l'appel : pour le client,
+                # c'est une session perdue, qu'il sait rouvrir (R60).
+                _feed_sessions.pop(session_id)
+                await _close_page_quietly(sess.page)
+                raise RuntimeError(f"session de fil inconnue : {session_id} (onglet perdu : {e} ; url={url})") from e
+            logger.exception("Erreur next_feed_posts")
+            raise RuntimeError(f"Erreur lors de la lecture de la session de fil : {e}") from e
+        sess.posts_returned += len(posts)
+        logger.info(
+            "Session de fil %s : url=%s , %d posts, exhausted=%s, total=%d",
+            session_id,
+            _page_url(sess.page),
+            len(posts),
+            exhausted,
+            sess.posts_returned,
+        )
+        if sess.posts_returned >= _FEED_SESSION_MAX_POSTS:
+            logger.warning(
+                "Session de fil %s : plafond de %d posts atteint — fermée",
+                session_id,
+                _FEED_SESSION_MAX_POSTS,
+            )
+            _feed_sessions.pop(session_id)
+            await _close_page_quietly(sess.page)
+            exhausted = True
+        return json.dumps(
+            {"posts": [p.to_public_dict() for p in posts], "exhausted": exhausted},
+            ensure_ascii=False,
+            indent=2,
+            default=str,
+        )
+    finally:
+        await _refocus_shared_page()
+
+
+@mcp.tool()
+@track_tool_calls
+@serialize_browser_access(wait_s=_LOCK_WAIT_WORK_S)
+async def end_feed_session(session_id: str, ctx: Context = None) -> str:
+    """Ferme une session de fil et son onglet. Sans effet si elle est déjà fermée.
+
+    Returns:
+        JSON `{"closed": true}`, ou `{"closed": false}` si la session était
+        inconnue (déjà fermée, expirée ou remplacée).
+    """
+    try:
+        sess = _feed_sessions.pop(session_id)
+        if sess is None:
+            return json.dumps({"closed": False})
+        await _close_feed_session_page(sess)
+        logger.info("Session de fil %s fermée", session_id)
+        return json.dumps({"closed": True})
+    finally:
+        await _refocus_shared_page()
 
 
 @mcp.tool()
