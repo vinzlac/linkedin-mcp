@@ -121,8 +121,25 @@ passe, déconnexion globale, détection d'anomalie).
 **Symptômes** : `scrape_feed` renvoie 0 post alors que le serveur démarre bien ; redirection
 vers la page de login dans les traces ; outils invitations/messagerie vides.
 
-**Procédure** : identique à la création — `just session`, vérifier avec `just test-feed 3`,
-puis re-sceller et redéployer si l'instance k3s est concernée.
+**Procédure (k3s, depuis le 2026-10-07)** : se connecter **dans le Chromium dédié de gpu-node**, jamais
+sur le Mac. Une session créée sur un navigateur puis utilisée depuis un autre est révoquée par LinkedIn
+en quelques minutes (incident du 2026-10-07, ADR-005).
+
+1. Tunnel : `ssh -N -L 9243:127.0.0.1:9243 vinz@192.168.1.154` (port CDP interne de l'instance).
+2. Sur le Mac, dans Chrome : `chrome://inspect/#devices` → *Configure…* → ajouter `localhost:9243`.
+3. Sous *Remote Target*, cliquer *inspect* sur l'onglet du Chromium dédié : DevTools affiche la page
+   en direct (screencast) et transmet clavier et souris. Dans l'onglet *Console*, taper
+   `location.href = "https://www.linkedin.com/login"`.
+4. Se connecter (e-mail, mot de passe, 2FA) dans la vue, jusqu'à l'affichage du fil.
+5. Fermer DevTools et le tunnel. Rien à redéployer : le profil porte la session.
+6. Contrôle : `kubectl -n linkedin-mcp logs deploy/linkedin-mcp | grep -i session` ne doit montrer
+   aucun « AMORCÉE » après la connexion. Lancer un `scrape_post` de test.
+
+**Secours, profil vierge** (nouveau nœud, profil supprimé) : le pod amorce le profil depuis le Sealed
+Secret. Sa session est souvent périmée : refaire aussitôt la procédure ci-dessus.
+
+Le fichier local du Mac (`just session`) ne sert plus qu'au développement local. Ne pas le sceller vers
+k3s s'il a servi sur le Mac.
 
 Avant de conclure à une session morte, écarter les autres causes classiques (voir le README) :
 dépendance `linkedin-playwright-scraper` à mettre à jour, régression DOM LinkedIn

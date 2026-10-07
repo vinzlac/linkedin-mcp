@@ -20,3 +20,4 @@ Chaque ADR suit le format :
 | [002](002-claude-code-mcp-client-via-litellm-gateway.md) | Enregistrement de `linkedin-mcp` (prod) comme client MCP Claude Code via le Gateway LiteLLM | Accepted |
 | [003](003-post-action-url-cascade.md) | Cascade d'URL et diagnostic de page pour les actions UI sur un post | Accepted |
 | [004](004-sessions-de-fil.md) | Sessions de fil LinkedIn sur un onglet dédié (lots successifs, une session à la fois) | Accepted |
+| [005](005-profil-chromium-dedie-amorcage-unique.md) | Profil Chromium dédié et amorçage unique de la session LinkedIn | Accepted |
