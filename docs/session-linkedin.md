@@ -81,7 +81,8 @@ alors le fichier de session du Sealed Secret, et seulement si le profil n'a pas 
 
 **Attention** : une session créée ou utilisée sur le Mac puis scellée sera très probablement révoquée par
 LinkedIn en quelques minutes. Après un amorçage, refaire aussitôt la procédure de
-[Renouveler la session](#renouveler-la-session).
+[Renouveler la session](#renouveler-la-session), **en commençant par vider les données du site**
+(étape 4 : le profil amorcé porte les cookies d'appareil du Mac).
 
 ### Secours — Sealed Secret
 
@@ -134,18 +135,28 @@ en quelques minutes (incident du 2026-10-07, ADR-005).
 
 1. Tunnel : `ssh -N -L 9243:127.0.0.1:9243 vinz@192.168.1.154` (port CDP interne de l'instance).
 2. Sur le Mac, dans Chrome : `chrome://inspect/#devices` → *Configure…* → ajouter `localhost:9243`.
-3. Sous *Remote Target*, cliquer *inspect* sur n'importe quelle page du Chromium dédié (plusieurs cibles
-   apparaissent : onglet `about:blank` en réserve, onglet de la session de fil). DevTools affiche la
-   page en direct (screencast) et transmet clavier et souris ; si aucune vue n'apparaît, activer le
-   bouton screencast de la barre d'outils DevTools. Dans l'onglet *Console*, taper
-   `location.href = "https://www.linkedin.com/login"`.
-4. Se connecter (e-mail, mot de passe, 2FA) dans la vue, jusqu'à l'affichage du fil.
-5. Fermer DevTools et le tunnel. Rien à redéployer : le profil porte la session.
-6. Contrôle : `kubectl -n linkedin-mcp logs deploy/linkedin-mcp | grep -i session` ne doit montrer
-   aucun « AMORCÉE » après la connexion. Lancer un `scrape_post` de test.
+3. Ne **pas** naviguer un onglet existant : le premier onglet (`pages[0]`) est l'onglet de travail du
+   pod. Depuis `chrome://inspect/#devices`, utiliser *Open tab with url* sous la section de
+   `localhost:9243` et ouvrir `https://www.linkedin.com/login` dans un **nouvel onglet**, puis cliquer
+   *inspect* sur cette cible. DevTools affiche la page en direct (screencast) et transmet clavier et
+   souris ; si aucune vue n'apparaît, activer le bouton screencast de la barre d'outils DevTools.
+   Éviter les créneaux où le pod utilise le navigateur : `linkedin-sync` (toutes les heures à :30,
+   10 h-21 h en semaine) et le cron du briefing de 20:00. Mettre `linkedin-auto-responder` en pause ne
+   se fait pas par `kubectl scale` : Argo CD (selfHeal) l'annulerait. Désactiver d'abord l'auto-sync de
+   l'application si on veut vraiment le mettre en pause.
+4. Avant de se connecter : si le profil a été amorcé depuis le Sealed Secret (ou contient une session
+   morte), ouvrir un onglet `linkedin.com`, DevTools → *Application* → *Storage* → **Clear site
+   data**. Le profil porte sinon les cookies d'appareil du Mac (`bcookie`, `bscookie`, `JSESSIONID`) :
+   le même jeton de session présenté avec deux empreintes d'appareil est révoqué par LinkedIn.
+5. Se connecter (e-mail, mot de passe, 2FA) dans la vue, jusqu'à l'affichage du fil. Fermer l'onglet
+   ouvert à l'étape 3.
+6. Fermer DevTools et le tunnel. Rien à redéployer : le profil porte la session.
+7. Contrôle : un `scrape_post` de test réussit et `linkedin_mcp_session_seeds_total` n'a pas bougé. (Le
+   log « AMORCÉE » n'apparaît qu'à l'initialisation du navigateur : son absence ne prouve rien.)
 
 **Secours, profil vierge** (nouveau nœud, profil supprimé) : le pod amorce le profil depuis le Sealed
-Secret. Sa session est souvent périmée : refaire aussitôt la procédure ci-dessus.
+Secret. Sa session est souvent périmée et le profil porte les cookies d'appareil du Mac : refaire
+aussitôt la procédure ci-dessus, **y compris le « Clear site data » de l'étape 4**.
 
 Le fichier local du Mac (`just session`) ne sert plus qu'au développement local. Ne pas le sceller vers
 k3s s'il a servi sur le Mac.

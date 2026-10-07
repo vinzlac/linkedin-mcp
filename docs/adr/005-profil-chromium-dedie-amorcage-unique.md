@@ -2,7 +2,7 @@
 
 - **Date** : 2026-10-07
 - **Statut** : accepté
-- **Remplace partiellement** : ADR-017 de k3s-homelab (Chromium partagé `chromium-cdp-host.openclaw`)
+- **Remplace partiellement** : ADR-017 de linkedin_scraper (`docs/adr/017-remote-cdp-homelab-chromium.md`, CDP distant vers le Chromium partagé `chromium-cdp-host.openclaw`)
 
 ## Contexte
 
@@ -34,3 +34,16 @@ sécurité, comme lors de l'incident du 2026-09-04.
   rescellement.
 - Un Chromium de plus sur gpu-node (quelques centaines de Mo de RAM).
 - Le profil partagé d'OpenClaw garde d'anciens cookies LinkedIn inutiles. Nettoyage facultatif.
+- Limites de l'alerte `LinkedinSessionSeeded` : un amorçage n'a lieu qu'à la recréation du navigateur
+  (pas de redémarrage préventif), donc une révocation peut rester invisible plusieurs jours. L'alerte se
+  résout seule après ~15 min. La mort réelle de la session est couverte par `LinkedinSyncErrorSpike`
+  (linkedin-auto-responder).
+- Exposition résiduelle : `range=192.168.1.153/32` admet tous les pods du Geekom (SNAT), et tout
+  processus local de gpu-node (DaemonSets `hostNetwork` compris) joint `127.0.0.1:9243`. Acceptable pour
+  le homelab.
+
+## Retour arrière
+
+Revert du merge sur `main` : l'URL CDP et l'image reviennent ensemble. Ne jamais faire tourner une image
+≥ 4.6.0 contre le profil partagé 9222 (OpenClaw) : le `clear_cookies` filtré efface puis réajoute **tous**
+les cookies du profil.

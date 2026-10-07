@@ -265,7 +265,7 @@ If `scrape_feed` / `repost_post` fails with **chrome-headless-shell missing** or
 If `scrape_feed` returns no posts in Claude Desktop but the server starts fine:
 
 1. **Mettre à jour `linkedin-playwright-scraper`** (dépendance PyPI, voir `pyproject.toml`) et redémarrer Claude Desktop complètement.
-2. **Regenerate session** if expired: `create_scrape_session` or `uv run python create_session.py`.
+2. **Regenerate session** if expired: `create_scrape_session` or `uv run python create_session.py`. On k3s, see [docs/session-linkedin.md](docs/session-linkedin.md) « Renouveler la session ».
 3. **Test locally** without Claude: `uv run python test_scrape_feeds.py 5 --dir output`
 4. **Install Chromium** if Playwright complains: `uv run playwright install chromium`
 

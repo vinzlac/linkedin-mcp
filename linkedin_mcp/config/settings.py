@@ -99,8 +99,9 @@ class Settings(BaseSettings):
     """
     LINKEDIN_CDP_URL: str = os.getenv("LINKEDIN_CDP_URL", "")
     """Connect to an existing Chromium over CDP instead of launching a local
-    one — e.g. "http://192.168.1.153:9222" for the homelab's
-    chromium-cdp-host (see linkedin_scraper ADR-017). No browser window ever
+    one — e.g. "http://192.168.1.154:9242" for the homelab's dedicated
+    LinkedIn Chromium on gpu-node (see docs/adr/005, and linkedin_scraper
+    ADR-017 for the CDP mechanism). No browser window ever
     appears locally, since the browser runs on the remote host. Empty string
     (default) launches a local browser as before.
     """
