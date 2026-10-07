@@ -176,6 +176,7 @@ def test_un_second_begin_ferme_la_session_precedente():
     try:
         with g, f:
             sid1 = json.loads(_run(server.begin_feed_session()))["session_id"]
+            _vieillir(sid1)
             sid2 = json.loads(_run(server.begin_feed_session()))["session_id"]
             assert sid1 != sid2
             assert manager.context.pages[0].closed is True
@@ -655,6 +656,47 @@ def test_begin_echoue_si_l_onglet_ne_revient_pas_sur_le_fil():
                 raise AssertionError("erreur attendue")
         assert manager.context.pages[0].closed is True
         assert len(server._feed_sessions) == 0
+    finally:
+        _uninstall()
+
+
+def _vieillir(session_id):
+    """Simule une session inutilisée depuis plus que la fenêtre d'activité."""
+    sess = server._feed_sessions.get(session_id)
+    sess.last_used -= server._FEED_SESSION_BUSY_WINDOW_S + 1
+
+
+def test_begin_refuse_si_une_autre_session_est_active():
+    # 2026-10-06 : un run cron et un run manuel simultanés se sont volé leurs
+    # sessions (4 rechargements du fil, un run arrêté en sans_session).
+    manager, g, f = _install()
+    try:
+        with g, f:
+            sid1 = json.loads(_run(server.begin_feed_session()))["session_id"]
+            try:
+                _run(server.begin_feed_session())
+            except RuntimeError as exc:
+                assert "session de fil occupée" in str(exc), str(exc)
+            else:
+                raise AssertionError("le second begin devait être refusé")
+            lot = json.loads(_run(server.next_feed_posts(session_id=sid1, count=2)))
+        assert len(lot["posts"]) == 2, "la session active reste utilisable"
+        assert manager.context.pages[0].closed is False
+        assert len(manager.context.pages) == 1, "aucun onglet ouvert pour le refus"
+    finally:
+        _uninstall()
+
+
+def test_next_compte_comme_activite_a_la_fin_de_la_lecture():
+    # La fenêtre se mesure depuis la FIN du dernier appel : une lecture dure
+    # ~50 s, et le worker trie ensuite le lot avant de redemander.
+    manager, g, f = _install()
+    try:
+        with g, f:
+            sid = json.loads(_run(server.begin_feed_session()))["session_id"]
+            _vieillir(sid)
+            _run(server.next_feed_posts(session_id=sid, count=1))
+            assert server._feed_sessions.active_since(server._FEED_SESSION_BUSY_WINDOW_S) is not None
     finally:
         _uninstall()
 
