@@ -13,7 +13,7 @@ de parler à linkedin.com sans redemander de mot de passe.
 | Outil de login | projet séparé `notebooklm-login` (`npm run login:chrome`) | `just session` / outil MCP `create_scrape_session` |
 | Fichier produit | `~/.notebooklm/session.json` | `linkedin_session.json` (chemin par OS, voir plus bas) |
 | Consommation | collé à la main dans la credential n8n « Session JSON » | lu directement via `LINKEDIN_SESSION_PATH` |
-| Sur le cluster | — (n8n porte la credential) | Sealed Secret `linkedin-mcp-session` monté dans le pod |
+| Sur le cluster | — (n8n porte la credential) | session portée par le profil du Chromium dédié de gpu-node (ADR-005) ; Sealed Secret `linkedin-mcp-session` = amorçage de secours seulement |
 
 ## Ce que contient le fichier
 
@@ -72,11 +72,18 @@ Si des posts remontent, la session est bonne. Sinon, voir
 Le navigateur headless reste volontairement ouvert entre deux scrapes : utilise l'outil
 **`close_scrape_browser`** pour le fermer proprement.
 
-## Propager la session vers l'instance k3s
+## Amorcer un profil vierge sur k3s (secours uniquement)
 
-Le pod ne peut pas ouvrir de fenêtre de login : il consomme la session créée en local.
+Depuis ADR-005 (2026-10-07), en k3s la session vit dans le **profil du Chromium dédié** de gpu-node,
+et se crée et se renouvelle **là**, pas sur le Mac : voir [Renouveler la session](#renouveler-la-session).
+Cette section ne sert qu'à **amorcer un profil vierge** (nouveau nœud, profil supprimé) : le pod injecte
+alors le fichier de session du Sealed Secret, et seulement si le profil n'a pas de `li_at` valide.
 
-### Voie normale — Sealed Secret
+**Attention** : une session créée ou utilisée sur le Mac puis scellée sera très probablement révoquée par
+LinkedIn en quelques minutes. Après un amorçage, refaire aussitôt la procédure de
+[Renouveler la session](#renouveler-la-session).
+
+### Secours — Sealed Secret
 
 ```bash
 export KUBECONFIG=~/.kube/config-k3s
@@ -101,17 +108,17 @@ Côté pod, le secret est monté en lecture seule sur `/secrets/session` et
 
 Prérequis : `kubectl` + `kubeseal` (`brew install kubeseal`).
 
-### Voie rapide — outils MCP
+### Outils MCP de transfert (développement local uniquement)
 
-Sans kubeseal, la session peut être transférée de machine à machine :
+Pour passer une session d'une instance locale à une autre :
 
 - **`get_scrape_session_json`** — renvoie le JSON brut de la session locale (valide le JSON
   avant de le rendre) ;
 - **`set_scrape_session_json`** — écrit ce JSON dans la session de l'instance visée.
 
-Pratique pour dépanner à chaud, mais **non persistant** : au prochain redémarrage du pod, le
-fichier monté depuis le Sealed Secret reprend la main. Repasser par `seal-secrets.sh` pour
-que ça tienne.
+Ne fonctionne **pas en k3s** : le fichier de session y est monté en lecture seule depuis le Sealed
+Secret, et le profil du Chromium dédié fait foi. Réservé au développement local ; pour k3s, suivre
+[Renouveler la session](#renouveler-la-session).
 
 ## Renouveler la session
 
@@ -127,8 +134,10 @@ en quelques minutes (incident du 2026-10-07, ADR-005).
 
 1. Tunnel : `ssh -N -L 9243:127.0.0.1:9243 vinz@192.168.1.154` (port CDP interne de l'instance).
 2. Sur le Mac, dans Chrome : `chrome://inspect/#devices` → *Configure…* → ajouter `localhost:9243`.
-3. Sous *Remote Target*, cliquer *inspect* sur l'onglet du Chromium dédié : DevTools affiche la page
-   en direct (screencast) et transmet clavier et souris. Dans l'onglet *Console*, taper
+3. Sous *Remote Target*, cliquer *inspect* sur n'importe quelle page du Chromium dédié (plusieurs cibles
+   apparaissent : onglet `about:blank` en réserve, onglet de la session de fil). DevTools affiche la
+   page en direct (screencast) et transmet clavier et souris ; si aucune vue n'apparaît, activer le
+   bouton screencast de la barre d'outils DevTools. Dans l'onglet *Console*, taper
    `location.href = "https://www.linkedin.com/login"`.
 4. Se connecter (e-mail, mot de passe, 2FA) dans la vue, jusqu'à l'affichage du fil.
 5. Fermer DevTools et le tunnel. Rien à redéployer : le profil porte la session.
