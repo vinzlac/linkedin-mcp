@@ -133,25 +133,42 @@ vers la page de login dans les traces ; outils invitations/messagerie vides.
 sur le Mac. Une session créée sur un navigateur puis utilisée depuis un autre est révoquée par LinkedIn
 en quelques minutes (incident du 2026-10-07, ADR-005).
 
-1. Tunnel : `ssh -N -L 9243:127.0.0.1:9243 vinz@192.168.1.154` (port CDP interne de l'instance).
-2. Sur le Mac, dans Chrome : `chrome://inspect/#devices` → *Configure…* → ajouter `localhost:9243`.
-3. Ne **pas** naviguer un onglet existant : le premier onglet (`pages[0]`) est l'onglet de travail du
-   pod. Depuis `chrome://inspect/#devices`, utiliser *Open tab with url* sous la section de
-   `localhost:9243` et ouvrir `https://www.linkedin.com/login` dans un **nouvel onglet**, puis cliquer
-   *inspect* sur cette cible. DevTools affiche la page en direct (screencast) et transmet clavier et
-   souris ; si aucune vue n'apparaît, activer le bouton screencast de la barre d'outils DevTools.
+1. Tunnel, laissé ouvert pendant toute la procédure :
+   `ssh -N -L 9243:127.0.0.1:9243 vinz@192.168.1.154` (port CDP interne de l'instance).
+2. Ouvrir la page de connexion dans un **nouvel** onglet du Chromium dédié, par l'API CDP, depuis le Mac :
+
+   ```bash
+   curl -s -X PUT "http://localhost:9243/json/new?https://www.linkedin.com/login" \
+     | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])"
+   ```
+
+   Noter l'identifiant affiché (`<ID>`). Ne **jamais** naviguer un onglet existant : le premier onglet
+   (`pages[0]`, souvent `about:blank`) est l'onglet de travail du pod.
+3. Ouvrir dans Chrome sur le Mac le DevTools **servi par le Chromium distant** (même version que lui) :
+   `http://localhost:9243/devtools/inspector.html?ws=localhost:9243/devtools/page/<ID>`
+   puis afficher la page avec **Cmd-Shift-M** (ou l'icône écran/téléphone de la barre DevTools) : la vue
+   est en direct et transmet clavier et souris.
+
+   Constaté le 2026-10-07 : depuis `chrome://inspect`, le bouton *Open tab with url* n'ouvrait rien, et le
+   lien `devtools://devtools/bundled/…` du Chrome du Mac coupait la WebSocket (« WebSocket
+   disconnected »), probablement un écart de version avec le Chromium distant. `chrome://inspect`
+   (*Discover network targets* → *Configure…* → `localhost:9243`, et surtout pas *Port forwarding*) reste
+   utile pour **voir** les onglets, pas pour les ouvrir.
+
    Éviter les créneaux où le pod utilise le navigateur : `linkedin-sync` (toutes les heures à :30,
    10 h-21 h en semaine) et le cron du briefing de 20:00. Mettre `linkedin-auto-responder` en pause ne
    se fait pas par `kubectl scale` : Argo CD (selfHeal) l'annulerait. Désactiver d'abord l'auto-sync de
    l'application si on veut vraiment le mettre en pause.
 4. Avant de se connecter : si le profil a été amorcé depuis le Sealed Secret (ou contient une session
-   morte), ouvrir un onglet `linkedin.com`, DevTools → *Application* → *Storage* → **Clear site
-   data**. Le profil porte sinon les cookies d'appareil du Mac (`bcookie`, `bscookie`, `JSESSIONID`) :
+   morte), dans le DevTools de l'étape 3 : *Application* → *Storage* → **Clear site data**, puis recharger la
+   page de connexion. Le profil porte sinon les cookies d'appareil du Mac (`bcookie`, `bscookie`, `JSESSIONID`) :
    le même jeton de session présenté avec deux empreintes d'appareil est révoqué par LinkedIn.
-5. Se connecter (e-mail, mot de passe, 2FA) dans la vue, jusqu'à l'affichage du fil. Fermer l'onglet
-   ouvert à l'étape 3.
+5. Se connecter (e-mail, mot de passe, 2FA) dans la vue, jusqu'à l'affichage du fil. Fermer ensuite
+   l'onglet ouvert à l'étape 2 : `curl -s -X PUT http://localhost:9243/json/close/<ID>`.
 6. Fermer DevTools et le tunnel. Rien à redéployer : le profil porte la session.
-7. Contrôle : un `scrape_post` de test réussit et `linkedin_mcp_session_seeds_total` n'a pas bougé. (Le
+7. Contrôle : noter `linkedin_mcp_session_seeds_total` **avant** de commencer
+   (`kubectl -n linkedin-mcp exec deploy/linkedin-mcp -- python -c "import urllib.request;print([l for l in urllib.request.urlopen('http://127.0.0.1:8000/metrics').read().decode().splitlines() if l.startswith('linkedin_mcp_session_seeds_total')])"`),
+   puis vérifier après coup qu'un `scrape_post` de test réussit et que le compteur n'a pas bougé. (Le
    log « AMORCÉE » n'apparaît qu'à l'initialisation du navigateur : son absence ne prouve rien.)
 
 **Secours, profil vierge** (nouveau nœud, profil supprimé) : le pod amorce le profil depuis le Sealed
