@@ -83,6 +83,26 @@ def test_pop_et_pop_all():
     assert len(reg) == 0
 
 
+def test_active_depuis_rend_la_session_utilisee_recemment():
+    # R58 bis — deux runs simultanés se volaient leurs sessions (2026-10-06).
+    h = Horloge()
+    reg = FeedSessionRegistry(clock=h)
+    sess, _ = reg.open("page", "scraper")
+    h.t += 100
+    assert reg.active_since(120) is sess
+    h.t += 30
+    assert reg.active_since(120) is None
+
+
+def test_touch_repousse_l_activite():
+    h = Horloge()
+    reg = FeedSessionRegistry(clock=h)
+    sess, _ = reg.open("page", "scraper")
+    h.t += 200
+    reg.touch(sess)
+    assert reg.active_since(120) is sess
+
+
 if __name__ == "__main__":
     for nom, fn in list(globals().items()):
         if nom.startswith("test_") and callable(fn):

@@ -55,6 +55,17 @@ class FeedSessionRegistry:
         sess.last_used = self._clock()
         return sess
 
+    def touch(self, sess: FeedSession) -> None:
+        """Marque la session comme utilisée maintenant (fin d'un appel)."""
+        sess.last_used = self._clock()
+
+    def active_since(self, window_s: float) -> Optional[FeedSession]:
+        """La session utilisée il y a moins de `window_s`, s'il y en a une :
+        elle appartient sans doute à un run en cours, qu'il ne faut pas
+        déposséder (deux runs simultanés, 2026-10-06)."""
+        limite = self._clock() - window_s
+        return next((s for s in self._sessions.values() if s.last_used >= limite), None)
+
     def pop(self, session_id: str) -> Optional[FeedSession]:
         return self._sessions.pop(session_id, None)
 

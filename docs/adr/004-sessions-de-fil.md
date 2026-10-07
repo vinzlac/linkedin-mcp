@@ -17,7 +17,7 @@ Deux contraintes supplémentaires :
 
 1. **Onglet dédié par session.** Une session de fil possède son propre onglet, distinct de l'onglet partagé : la position survit au garage de l'onglet partagé. Le registre (`feed_session_registry`) stocke la session, indexée par `session_id`.
 2. **Verrou tenu par appel uniquement.** Le verrou du navigateur est pris le temps d'un appel d'outil, jamais entre deux lots : les autres outils restent utilisables pendant qu'une session est ouverte.
-3. **Une seule session à la fois.** L'ancienne session est fermée **avant** que le nouveau fil ne se charge, pour ne jamais cumuler deux fils lourds en mémoire.
+3. **Une seule session à la fois.** L'ancienne session est fermée **avant** que le nouveau fil ne se charge, pour ne jamais cumuler deux fils lourds en mémoire. Exception (2026-10-07) : si l'ancienne session a servi il y a moins de 2 minutes, elle appartient sans doute à un run en cours ; la nouvelle est alors refusée (« session de fil occupée ») et le client lit le fil en une fois (`scrape_feed`). Deux runs simultanés se volaient sinon leurs sessions (2026-10-06 : 4 rechargements du fil en 3 minutes).
 4. **Expiration à 600 s d'inactivité.** Toute lecture repousse l'échéance ; une session abandonnée par un worker planté est récupérée et son onglet fermé.
 5. **Purge à la fermeture du singleton.** Fermer le navigateur purge toutes les sessions et ferme leurs onglets.
 6. **Premier plan rendu à l'onglet partagé** après chaque opération sur l'onglet dédié, afin qu'il ne soit jamais gelé en arrière-plan (af51454).

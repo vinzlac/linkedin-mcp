@@ -246,6 +246,11 @@ _FEED_SESSION_PROBE_TIMEOUT_S = 2
 _FEED_SESSION_SETTLE_QUIET_S = 2.0
 _FEED_SESSION_SETTLE_TIMEOUT_S = 15.0
 _FEED_SESSION_SETTLE_POLL_S = 0.25
+# Une session utilisée il y a moins de cette fenêtre appartient sans doute à un
+# run en cours : un second begin est refusé au lieu de la remplacer. Entre deux
+# lots, le worker trie le lot (LLM) avant de redemander ; 2026-10-06 : deux
+# runs simultanés se sont volé leurs sessions (4 rechargements du fil).
+_FEED_SESSION_BUSY_WINDOW_S = 120
 
 _feed_sessions = FeedSessionRegistry(idle_ttl_s=_FEED_SESSION_IDLE_TTL_S)
 _feed_session_reaper: "asyncio.Task | None" = None
@@ -1311,7 +1316,8 @@ async def begin_feed_session(ctx: Context = None) -> str:
 
     La session garde sa position entre deux appels de `next_feed_posts` : on lit
     le fil par lots, comme un humain qui fait défiler, sans le recharger. Une
-    seule session à la fois (la précédente est fermée) ; fermeture automatique
+    seule session à la fois : refusée (« session de fil occupée ») si une autre a
+    servi il y a moins de 2 minutes, sinon l'ancienne est fermée ; fermeture automatique
     après 10 minutes sans appel. Fermer avec `end_feed_session`.
 
     Returns:
@@ -1319,6 +1325,13 @@ async def begin_feed_session(ctx: Context = None) -> str:
     """
     try:
         await _reap_feed_sessions_once()
+        active = _feed_sessions.active_since(_FEED_SESSION_BUSY_WINDOW_S)
+        if active is not None:
+            logger.warning("Session de fil %s active — nouvelle session refusée", active.session_id)
+            raise RuntimeError(
+                f"session de fil occupée : une autre session ({active.session_id}) a servi il y a moins "
+                f"de {_FEED_SESSION_BUSY_WINDOW_S} s ; réessayer plus tard ou lire en une fois (scrape_feed)"
+            )
         # R58 — fermer l'ancienne session AVANT d'en charger une nouvelle : deux
         # fils chargés coexisteraient dans le Chromium hôte (3,26 G le 2026-09-21).
         for ancienne in _feed_sessions.pop_all():
@@ -1407,6 +1420,7 @@ async def next_feed_posts(session_id: str, count: int = 10, ctx: Context = None)
             logger.exception("Erreur next_feed_posts")
             raise RuntimeError(f"Erreur lors de la lecture de la session de fil : {e}") from e
         sess.posts_returned += len(posts)
+        _feed_sessions.touch(sess)
         logger.info(
             "Session de fil %s : url=%s , %d posts, exhausted=%s, total=%d",
             session_id,
