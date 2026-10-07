@@ -41,3 +41,23 @@ tests:
       - eval_time: 10m
         alertname: LinkedinMcpDown
         exp_alerts: []
+
+  # Compteur stable -> silence ; hausse -> alerte immédiate (pas de for:).
+  - interval: 1m
+    input_series:
+      - series: 'linkedin_mcp_session_seeds_total{namespace="linkedin-mcp",pod="linkedin-mcp-x"}'
+        values: '0x10 1x10'
+    alert_rule_test:
+      - eval_time: 9m
+        alertname: LinkedinSessionSeeded
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: LinkedinSessionSeeded
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: linkedin-mcp
+              pod: linkedin-mcp-x
+            exp_annotations:
+              summary: "linkedin-mcp a dû réamorcer la session LinkedIn"
+              description: "Le profil du Chromium dédié n'avait plus de session LinkedIn valide : session réinjectée depuis le Sealed Secret. Vérifier la connexion et la renouveler si besoin (docs/session-linkedin.md, « Renouveler la session »)."

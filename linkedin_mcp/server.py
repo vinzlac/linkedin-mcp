@@ -16,7 +16,7 @@ from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from starlette.requests import Request
 from starlette.responses import Response
 
-from .metrics import track_tool_calls
+from .metrics import record_session_seed, track_tool_calls
 
 from .linkedin.auth import LinkedInOAuth, AuthError, TokenExpiredError
 from .linkedin.post import PostManager, PostRequest, PostCreationError, MediaRequest, PostVisibility
@@ -491,8 +491,15 @@ async def _get_browser() -> BrowserManager:
     except Exception as exc:
         _browser_manager = None
         raise _playwright_start_error(exc) from exc
+    record_session_seed(getattr(_browser_manager, "session_seeded", False))
     _browser_initialized = True
-    logger.info(f"Navigateur Playwright initialisé avec la session {session_path}")
+    if getattr(_browser_manager, "session_seeded", False):
+        logger.warning(
+            "Navigateur initialisé : session LinkedIn AMORCÉE depuis %s "
+            "(le profil n'en avait pas de valide)", session_path
+        )
+    else:
+        logger.info("Navigateur initialisé : session LinkedIn du profil conservée")
     return _browser_manager
 
 

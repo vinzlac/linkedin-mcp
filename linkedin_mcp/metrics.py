@@ -20,6 +20,19 @@ TOOL_CALLS_TOTAL = Counter(
     ["tool", "outcome"],
 )
 
+SESSION_SEEDS_TOTAL = Counter(
+    "linkedin_mcp_session_seeds_total",
+    "Session LinkedIn injectée depuis le fichier dans le profil du navigateur "
+    "(profil sans li_at valide) — chaque hausse = LinkedIn a supprimé la session "
+    "ou le profil a été remis à zéro",
+)
+
+
+def record_session_seed(seeded: bool) -> None:
+    """Compte un amorçage de session ; une session conservée ne compte pas."""
+    if seeded:
+        SESSION_SEEDS_TOTAL.inc()
+
 F = TypeVar("F", bound=Callable[..., Awaitable[object]])
 
 

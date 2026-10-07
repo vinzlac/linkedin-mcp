@@ -11,3 +11,14 @@ groups:
         annotations:
           summary: "linkedin-mcp has no scrape target reporting up"
           description: "No linkedin-mcp Prometheus target is up for 5m — the MCP server may be down, crash-looping, or unreachable. linkedin-sync depends on it."
+      - alert: LinkedinSessionSeeded
+        # Hausse du compteur = le profil du Chromium dédié n'avait plus de li_at
+        # valide : LinkedIn a supprimé la session (déconnexion forcée) ou le profil
+        # a été remis à zéro. La session amorcée vient du Sealed Secret, souvent
+        # périmée : à renouveler dans le Chromium dédié (docs/session-linkedin.md).
+        expr: increase(linkedin_mcp_session_seeds_total[15m]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "linkedin-mcp a dû réamorcer la session LinkedIn"
+          description: "Le profil du Chromium dédié n'avait plus de session LinkedIn valide : session réinjectée depuis le Sealed Secret. Vérifier la connexion et la renouveler si besoin (docs/session-linkedin.md, « Renouveler la session »)."
