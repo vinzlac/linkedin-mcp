@@ -42,6 +42,19 @@ sécurité, comme lors de l'incident du 2026-09-04.
   processus local de gpu-node (DaemonSets `hostNetwork` compris) joint `127.0.0.1:9243`. Acceptable pour
   le homelab.
 
+## Validation
+
+Relevé du 2026-10-08 vers 11:20 UTC, soit ~18 h après la mise en service (2026-10-07 17:30 UTC) :
+
+- `linkedin_mcp_session_seeds_total` = 0 : le profil a gardé sa session, aucun réamorçage.
+- Plus aucun « Not logged in » dans les logs de `linkedin-mcp` ni de `linkedin-sync`. La seule
+  erreur de `linkedin-sync` depuis est un « navigateur occupé » (contention du verrou, pas
+  d'authentification) ; les synchronisations suivantes sont complètes.
+- Cron `linkedin-feed-daily` du 2026-10-07 20:00 (run `9175953d`) : terminé, 50 posts lus, 3 nouveaux.
+- `scrape_post` sur un permalien `/posts/…-ugcPost-…` (avec et sans `utm_*`/`rcm`) : réussi en ~4 s.
+
+À compléter après le cron du 2026-10-08 20:00 pour couvrir 24 h.
+
 ## Retour arrière
 
 Revert du merge sur `main` : l'URL CDP et l'image reviennent ensemble. Ne jamais faire tourner une image
