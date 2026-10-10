@@ -1705,8 +1705,10 @@ async def send_message(
 ) -> str:
     """Envoie un message texte dans une conversation LinkedIn existante.
 
-    Utilise la session Playwright. Ouvre le thread, saisit le texte, puis
-    envoie (bouton Envoyer/Send si présent, sinon Entrée).
+    Envoie par l'API Voyager ``createMessage`` (linkedin_scraper >= 4.7.0,
+    ADR-021) : le fil n'est pas ouvert dans le navigateur. Un seul appel,
+    sans nouvelle tentative : en cas d'erreur après un HTTP 200, ne pas
+    rejouer sans vérifier le fil.
 
     Args:
         conversation_id: Id du thread (``/messaging/thread/{id}/``)
