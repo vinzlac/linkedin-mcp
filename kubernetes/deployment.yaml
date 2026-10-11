@@ -36,7 +36,7 @@ spec:
         fsGroup: 1000
       containers:
         - name: app
-          image: ghcr.io/vinzlac/linkedin-mcp:9762df7281c85222eecf8ef58c1f4f3a8ff79a9e
+          image: ghcr.io/vinzlac/linkedin-mcp:03c7317b41391c0d8700b70f58d971a0470a1377
           imagePullPolicy: Always
           ports:
             - name: http
