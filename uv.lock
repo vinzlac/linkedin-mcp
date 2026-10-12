@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.12"
 
 [[package]]
@@ -374,7 +374,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "httpx", specifier = ">=0.28.1" },
-    { name = "linkedin-playwright-scraper", specifier = ">=4.7.3" },
+    { name = "linkedin-playwright-scraper", specifier = ">=4.7.4" },
     { name = "mcp", extras = ["cli"], specifier = ">=1.6.0" },
     { name = "prometheus-client", specifier = ">=0.21.0" },
     { name = "pydantic", specifier = ">=2.10.5" },
@@ -385,7 +385,7 @@ requires-dist = [
 
 [[package]]
 name = "linkedin-playwright-scraper"
-version = "4.7.3"
+version = "4.7.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiofiles" },
@@ -395,9 +395,9 @@ dependencies = [
     { name = "python-dotenv" },
     { name = "requests" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/47/37/854a09a057a964dca62adb78aeebd360aecaa30637ab7bbc3604c969abd9/linkedin_playwright_scraper-4.7.3.tar.gz", hash = "sha256:ce4ffc67e67de5f799453414117f1fa3a6fc4afb44de1ccef23b92508c890dc9", size = 300074, upload-time = "2026-10-11T19:50:45.28Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/11/9d/763251368d9097e8b5f450938a4ddcae327e3365828f919c20663f5b7345/linkedin_playwright_scraper-4.7.4.tar.gz", hash = "sha256:d581184601aff2ab77d84cc2a9bd865de591442bfb0a375fdee255dab668ba48", size = 300720, upload-time = "2026-10-12T17:43:13.363Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/da/db/8df8f0ae993f118d66b81fa2815de369e1544038642a67b93ef775b2c58f/linkedin_playwright_scraper-4.7.3-py3-none-any.whl", hash = "sha256:3c1f02f6fa4e3e09a6e2c68bf749d5fe7d3aef89e8200fd7e9d99ab0caccaee9", size = 106944, upload-time = "2026-10-11T19:50:43.653Z" },
+    { url = "https://files.pythonhosted.org/packages/86/a9/466ff7ca162102892a305459d8b25356c07c4a57518ed98dc7d7d7334270/linkedin_playwright_scraper-4.7.4-py3-none-any.whl", hash = "sha256:e21614918ccf05019effde7854e053848273e38dbf8cdce1b63029fc114f920a", size = 107216, upload-time = "2026-10-12T17:43:11.846Z" },
 ]
 
 [[package]]
