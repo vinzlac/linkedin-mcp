@@ -1715,7 +1715,13 @@ async def send_message(
         text: Corps du message (non vide)
 
     Returns:
-        JSON ``{"ok": true/false, "conversation_id": "..."}``
+        JSON ``{"ok": true, "conversation_id": "..."}`` quand LinkedIn a
+        renvoyé le message créé.
+
+    Raises:
+        RuntimeError: tout autre résultat (HTTP non 2xx, réponse sans message
+            créé, paramètre vide) lève une erreur d'outil MCP
+            (``isError: true``) ; il n'y a pas de réponse ``{"ok": false}``.
     """
     logger.info(
         "Sending message to %s (%s chars)", conversation_id, len(text or "")
