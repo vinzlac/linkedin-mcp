@@ -65,7 +65,7 @@ Google) est coupée depuis chez l'utilisateur : `ETIMEDOUT` depuis les pods des 
 (`curl -4`), alors que l'IPv6 passe et que `curl -4 https://lnkd.in/` répond `301` depuis le partage 4G d'un
 iPhone. Conséquence : le worker `linkedin-feed-scrapping` ne résout plus les liens courts `lnkd.in` (message
 « Le lien court lnkd.in n'a pas pu être résolu (service injoignable) »), donc plus de partage par lien court
-via Hermes. Aucune alerte n'a signalé la panne : elle a été découverte à l'usage.
+via Hermes. La panne a été découverte à l'usage ; je n'ai pas vérifié si une alerte avait été émise.
 
 ### Besoin
 
