@@ -50,3 +50,36 @@ dans le pod.
 
 Rencontré en préparant l'essai d'injection (critère 8) de la tranche 1 de Hermes : un post de test devait
 être publié par `create_post`. L'essai a été fait en publiant à la main.
+
+## B-002 — Alerte Telegram quand la route IPv4 vers LinkedIn / Google est coupée ou rétablie
+
+- **Priorité** : basse (à traiter plus tard)
+- **Ouverte le** : 2026-10-20
+- **Type** : besoin de supervision. Le travail se ferait dans `k3s-homelab` (`kubernetes/monitoring/`), cette
+  entrée est ici faute d'un autre backlog.
+
+### Constat (2026-10-20)
+
+La route IPv4 du LAN vers `130.211.32.14` (load balancer de `lnkd.in` et `www.linkedin.com`, hébergé chez
+Google) est coupée depuis chez l'utilisateur : `ETIMEDOUT` depuis les pods des deux nœuds et depuis le Mac
+(`curl -4`), alors que l'IPv6 passe et que `curl -4 https://lnkd.in/` répond `301` depuis le partage 4G d'un
+iPhone. Conséquence : le worker `linkedin-feed-scrapping` ne résout plus les liens courts `lnkd.in` (message
+« Le lien court lnkd.in n'a pas pu être résolu (service injoignable) »), donc plus de partage par lien court
+via Hermes. Aucune alerte n'a signalé la panne : elle a été découverte à l'usage.
+
+### Besoin
+
+Être prévenu sur Telegram quand cette route tombe, et surtout **quand elle revient**, sans la tester à la main.
+
+### Pistes (non évaluées, rien n'a été lu ni testé côté monitoring)
+
+- Réutiliser le `blackbox-exporter` déjà présent (`kubernetes/monitoring/templates/blackbox-exporter.yaml`, sondes
+  TLS mail) avec un module HTTP forcé en IPv4 (`preferred_ip_protocol: ip4`, sans repli IPv6) sur
+  `https://lnkd.in/`, réponse `301` attendue, redirection non suivie. La sonde doit partir **d'un pod** : c'est ce
+  chemin qui compte.
+- Règle Prometheus (`for` de quelques minutes) routée par l'adaptateur Alertmanager → Apprise → Telegram déjà en
+  place (`kubernetes/monitoring/templates/alertmanager-apprise-adapter.yaml`). À vérifier : le message « résolu »
+  est bien envoyé, c'est lui qui dit que c'est revenu.
+- Variante légère : un moniteur TCP `130.211.32.14:443` dans Uptime Kuma (VM Debian). Moins représentatif, car il
+  ne part pas d'un pod.
+- Éviter une alerte bruyante pour une panne de l'opérateur : durée de `for` longue, une seule notification.
