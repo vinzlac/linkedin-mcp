@@ -84,7 +84,7 @@ via Hermes. La panne a été découverte à l'usage ; je n'ai pas vérifié si u
   ne part pas d'un pod.
 - Éviter une alerte bruyante pour une panne de l'opérateur : durée de `for` longue, une seule notification.
 
-## B-003 — Le scraper n'extrait pas les posts de l'utilisateur lui-même
+## B-003 — Le scraper n'extrait pas deux posts de test de l'utilisateur
 
 - **Priorité** : moyenne (bloque le rejeu du critère 8 de la tranche 1 de Hermes)
 - **Ouverte le** : 2026-10-21
@@ -93,16 +93,17 @@ via Hermes. La panne a été découverte à l'usage ; je n'ai pas vérifié si u
 ### Constat
 
 `scrape_post` répond `No post extracted from detail URL` (journal de `linkedin-mcp`, `linkedin_scraper.scrapers.feed`)
-pour deux posts de test écrits par l'utilisateur, publiés en « Connexions » (20 et 21/10/2026) : URL
-`linkedin.com/posts/share-<id>-<suffixe>/` (20/10) puis `linkedin.com/feed/update/urn:li:activity:<id>/` (21/10, URN
-tiré de la redirection du lien court). Même jour, témoin : `scrape_post` sur un post d'un tiers (`…ugcPost-…`) renvoie
+pour deux posts de test écrits par l'utilisateur, publiés en « Connexions » (20 et 21/10/2026) : le 20/10, URL
+`linkedin.com/feed/update/urn:li:activity:<id du chemin>/` (URN deviné) puis, deux fois,
+`linkedin.com/posts/share-<id>-<suffixe>/` ; le 21/10, `linkedin.com/feed/update/urn:li:activity:<id>/` (URN tiré de la redirection du lien court). Le
+21/10, témoin : `scrape_post` sur un post d'un tiers (`…ugcPost-…`) renvoie
 4 311 caractères et l'URN d'activité. Le scraper est donc sain, et l'échec ne dépend pas de la forme de l'URL.
 
 ### Cause
 
 Inconnue. HYPOTHÈSE: la page de détail d'un post de l'utilisateur lui-même, ou d'un post texte seul récent en
 « Connexions », a une mise en page que l'extracteur ne reconnaît pas. À vérifier : lire l'extracteur de
-`linkedin-playwright-scraper` (version déployée 4.7.7) et comparer avec le DOM d'un tel post ; essayer un post
+`linkedin-playwright-scraper` (`uv.lock` : 4.7.7 ; version du pod non vérifiée) et comparer avec le DOM d'un tel post ; essayer un post
 « Public » ou avec une image.
 
 ## B-004 — Le worker rejette les URL de posts sans nom d'auteur (`/posts/share-<id>-xxxx`)
@@ -116,12 +117,18 @@ Inconnue. HYPOTHÈSE: la page de détail d'un post de l'utilisateur lui-même, o
 Le lien court d'un post de l'utilisateur redirige vers
 `linkedin.com/posts/share-<id>-<suffixe>/?highlightedUpdateUrn=urn:li:activity:<id d'activité>&…`. Le worker répond
 `INVALID_URL` (« Ce lien n'est pas un post LinkedIn ») : `STRICT_POST_PATH` exige `<nom>-(share|ugcPost|activity)-<id>-…`.
-L'identifiant du chemin n'est pas l'identifiant d'activité (le deviner donne « Post introuvable »), et
+L'identifiant du chemin n'est pas l'identifiant d'activité (le 21/10, chemin `share-7518657199171178496`, URN
+réel `activity:7518657199875850244`), et
 `cleanPermalink` retire la requête, donc le vrai URN d'activité (`highlightedUpdateUrn`) est perdu.
 
 ### Piste
 
+Contournement en attendant, utile une fois B-003 levé : envoyer au bot l'URL `feed/update/urn:li:activity:<id d'activité>`
+à la main, l'id étant lu dans `highlightedUpdateUrn` de la redirection du lien court (cette URL passe la regex ; l'extraction
+reste B-003).
+
 Après résolution d'un lien court, lire `highlightedUpdateUrn` avant le nettoyage de la requête et construire
-`feed/update/urn:li:activity:<id>`, qui passe déjà la regex. À éviter : relâcher la regex sans récupérer l'URN
+`feed/update/urn:li:activity:<id>`, qui passe déjà la regex (mais que `scrape_post` n'extrait pas, pour ces posts, tant que
+B-003 n'est pas levé). À éviter : relâcher la regex sans récupérer l'URN
 d'activité, sous peine d'une clé de déduplication fausse (le cron et le partage manuel doivent produire la même
 clé). Sans effet pour les posts de tiers, dont l'URL porte un nom d'auteur (cas courant).
