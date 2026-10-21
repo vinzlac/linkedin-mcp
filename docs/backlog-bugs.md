@@ -101,10 +101,26 @@ pour deux posts de test écrits par l'utilisateur, publiés en « Connexions » 
 
 ### Cause
 
-Inconnue. HYPOTHÈSE: la page de détail d'un post de l'utilisateur lui-même, ou d'un post texte seul récent en
-« Connexions », a une mise en page que l'extracteur ne reconnaît pas. À vérifier : lire l'extracteur de
-`linkedin-playwright-scraper` (`uv.lock` : 4.7.7 ; version du pod non vérifiée) et comparer avec le DOM d'un tel post ; essayer un post
-« Public » ou avec une image.
+Établie le 2026-10-21 (inspection du DOM dans Chrome sur deux posts de test de l'utilisateur, texte seul, « Connexions »). Deux
+causes en cascade, la première cachant la seconde :
+
+1. LinkedIn n'affiche pas « Republier » sur les posts du compte connecté (0 bouton sur la page de détail ; 7 sur le fil de
+   tiers). `linkedin_scraper` ancre chaque carte sur ce bouton (`scrapers/feed.py`, `_extract_posts_from_feed`) : aucune carte
+   trouvée, d'où `No post extracted…`.
+2. La barre d'action de ces posts n'a que des boutons icône, dont le texte est un espace invisible (U+200B) : rien ne marquait
+   la fin du post, et le texte aurait couru jusqu'au pied de page.
+
+L'URN d'activité est bien dans la page (attribut `data-testid`) : ce n'est pas une question d'identité du post.
+
+### Correctif
+
+PR [linkedin_scraper #15](https://github.com/vinzlac/linkedin_scraper/pull/15) (branche `fix/scrape-own-post`) : ancrage de
+repli sur « Commenter » et borne du texte sur les lignes d'espaces invisibles. Validé en live sur un vrai post (texte extrait =
+texte du post) ; 164 tests unitaires passés. Limite : un fil ne contenant qu'un seul « Republier » englobe toute la page, donc un
+post du compte connecté y est vu comme déjà couvert.
+
+**Reste à faire** : merger la PR, publier une version de `linkedin_scraper`, relever la dépendance de `linkedin-mcp`
+(`>=4.7.7` dans `pyproject.toml`), redéployer l'image, puis rejouer le critère 8 de Hermes.
 
 ## B-004 — Le worker rejette les URL de posts sans nom d'auteur (`/posts/share-<id>-xxxx`)
 
